@@ -85,7 +85,7 @@ class PigmentWindow(Adw.ApplicationWindow):
             entry.set_text(value)
             entry.set_width_chars(width)
             entry.add_css_class("pigment-ob-entry")
-                entry.connect("activate", self._on_ob_entry_changed, label)
+            entry.connect("activate", self._on_ob_entry_changed, label)
             bar.append(lbl)
             bar.append(entry)
             bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))

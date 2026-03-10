@@ -211,7 +211,11 @@ class PigmentCanvas(Gtk.DrawingArea):
             bgra, cairo.FORMAT_ARGB32, w, h
         )
         # Keep a reference so the buffer isn't GC'd while surface is alive
-        surf._numpy_ref = bgra
+        # Store ref as list attribute to prevent GC (cairo surfaces are C objects)
+        self._bgra_refs = getattr(self, '_bgra_refs', [])
+        self._bgra_refs.append(bgra)
+        if len(self._bgra_refs) > 4:
+            self._bgra_refs.pop(0)
         return surf
 
     # ── ZOOM ─────────────────────────────────────────────────────────────────
@@ -344,7 +348,7 @@ class PigmentCanvas(Gtk.DrawingArea):
             self._offset_y = self._pan_origin_y + offset_y
             self.queue_draw()
         elif self._painting:
-            sx, sy = gesture.get_start_point()
+            _ok, sx, sy = gesture.get_start_point()
             self.continue_paint(sx + offset_x, sy + offset_y)
 
     def _on_drag_end(self, gesture, offset_x, offset_y):
