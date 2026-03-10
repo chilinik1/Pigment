@@ -235,14 +235,46 @@ class PigmentWindow(Adw.ApplicationWindow):
         color_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         color_box.set_margin_top(8); color_box.set_margin_bottom(8)
         color_box.set_margin_start(8); color_box.set_margin_end(8)
-        for ch_name, val in [("R", 0), ("G", 0), ("B", 0)]:
+
+        # Color preview swatch
+        self._color_swatch = Gtk.DrawingArea()
+        self._color_swatch.set_size_request(-1, 36)
+        self._color_swatch.set_draw_func(self._draw_color_swatch)
+        color_box.append(self._color_swatch)
+
+        # RGB sliders
+        self._color_rgb = [0, 0, 0]
+        self._rgb_value_labels = {}
+        self._rgb_sliders = {}
+        for ch_name, idx in [("R", 0), ("G", 1), ("B", 2)]:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            row.append(Gtk.Label(label=ch_name))
+            lbl = Gtk.Label(label=ch_name)
+            lbl.set_size_request(14, -1)
+            row.append(lbl)
             sl = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 255, 1)
-            sl.set_value(val); sl.set_hexpand(True); sl.set_draw_value(False)
+            sl.set_value(0)
+            sl.set_hexpand(True)
+            sl.set_draw_value(False)
+            sl.connect("value-changed", self._on_rgb_slider, idx)
+            self._rgb_sliders[idx] = sl
             row.append(sl)
-            row.append(Gtk.Label(label=str(val)))
+            val_lbl = Gtk.Label(label="0")
+            val_lbl.set_size_request(28, -1)
+            self._rgb_value_labels[idx] = val_lbl
+            row.append(val_lbl)
             color_box.append(row)
+
+        # Hex entry
+        hex_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hex_row.append(Gtk.Label(label="#"))
+        self._hex_entry = Gtk.Entry()
+        self._hex_entry.set_text("000000")
+        self._hex_entry.set_width_chars(7)
+        self._hex_entry.set_max_length(6)
+        self._hex_entry.connect("activate", self._on_hex_entry)
+        hex_row.append(self._hex_entry)
+        color_box.append(hex_row)
+
         notebook.append_page(color_box, Gtk.Label(label="Color"))
 
         # History
@@ -385,6 +417,49 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._active_tool_id = tool_id
         if tool_id in self._tool_buttons:
             self._tool_buttons[tool_id].add_css_class("pigment-tool-active")
+
+    # ── COLOR PICKER ─────────────────────────────────────────────────────────
+
+    def _draw_color_swatch(self, area, cr, width, height):
+        r, g, b = [v / 255.0 for v in self._color_rgb]
+        cr.set_source_rgb(r, g, b)
+        cr.paint()
+        # Border
+        cr.set_source_rgba(0, 0, 0, 0.2)
+        cr.set_line_width(1)
+        cr.rectangle(0, 0, width, height)
+        cr.stroke()
+
+    def _on_rgb_slider(self, slider, channel_idx):
+        val = int(slider.get_value())
+        self._color_rgb[channel_idx] = val
+        self._rgb_value_labels[channel_idx].set_text(str(val))
+        self._sync_color()
+
+    def _on_hex_entry(self, entry):
+        text = entry.get_text().strip().lstrip("#")
+        if len(text) == 6:
+            try:
+                r = int(text[0:2], 16)
+                g = int(text[2:4], 16)
+                b = int(text[4:6], 16)
+                self._color_rgb = [r, g, b]
+                # Update sliders without triggering their callbacks
+                for idx, val in enumerate([r, g, b]):
+                    self._rgb_sliders[idx].handler_block_by_func(self._on_rgb_slider)
+                    self._rgb_sliders[idx].set_value(val)
+                    self._rgb_value_labels[idx].set_text(str(val))
+                    self._rgb_sliders[idx].handler_unblock_by_func(self._on_rgb_slider)
+                self._sync_color()
+            except ValueError:
+                pass
+
+    def _sync_color(self):
+        r, g, b = self._color_rgb
+        self._canvas._brush_color = (r, g, b)
+        self._color_swatch.queue_draw()
+        # Update hex entry
+        self._hex_entry.set_text(f"{r:02x}{g:02x}{b:02x}")
 
     def _on_ob_entry_changed(self, entry, label):
         text = entry.get_text().replace("%", "").strip()
