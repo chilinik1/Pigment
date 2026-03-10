@@ -1,10 +1,11 @@
-# Main window: HeaderBar, options bar, toolbox, canvas, panels, statusbar
+# Main window — Phase 6 — GNOME CSD + PS layout + accordion panels
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk, Gio
+from gi.repository import Gtk, Adw, Gdk, Gio, GLib
 from pigment.ui.canvas import PigmentCanvas
 from pigment.core.document import Document
+
 
 class PigmentWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
@@ -15,71 +16,183 @@ class PigmentWindow(Adw.ApplicationWindow):
 
         self._documents = []
         self._active_doc = None
+        self._color_rgb = [0, 0, 0]
+        self._rgb_sliders = {}
+        self._rgb_value_labels = {}
+        self._panel_visible = True
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root)
 
         root.append(self._build_headerbar())
         root.append(self._build_optionsbar())
+        root.append(self._build_tabbar())
 
         workspace = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         workspace.set_vexpand(True)
         workspace.append(self._build_toolbox())
         workspace.append(self._build_canvas_area())
-        workspace.append(self._build_panels())
+        workspace.append(self._build_right_panel())
         root.append(workspace)
 
         root.append(self._build_statusbar())
 
-    # ── HEADER BAR ──────────────────────────────────────────────────────────
+    # ── HEADERBAR ────────────────────────────────────────────────────────────
     def _build_headerbar(self):
         header = Adw.HeaderBar()
 
-        title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        logo = Gtk.Label(label="Pg")
-        logo.add_css_class("pigment-logo-mark")
+        # Brand
+        brand = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        mark = Gtk.Label(label="Pg")
+        mark.add_css_class("pigment-logo-mark")
         name = Gtk.Label(label="Pigment")
         name.add_css_class("pigment-logo-name")
-        version = Gtk.Label(label='0.1 "Buzz"')
-        version.add_css_class("pigment-logo-version")
-        title_box.append(logo)
-        title_box.append(name)
-        title_box.append(version)
-        header.set_title_widget(title_box)
+        ver = Gtk.Label(label='0.1 "Buzz"')
+        ver.add_css_class("pigment-logo-version")
+        brand.append(mark)
+        brand.append(name)
+        brand.append(ver)
+        header.pack_start(brand)
 
-        self._dark = False
-        self._theme_btn = Gtk.Button(label="☾  Dark")
-        self._theme_btn.add_css_class("flat")
-        self._theme_btn.connect("clicked", self._toggle_theme)
-        header.pack_end(self._theme_btn)
+        # Menu items inline
+        for label, builder in [
+            ("File",   self._build_file_menu),
+            ("Edit",   self._build_edit_menu),
+            ("Image",  self._build_image_menu),
+            ("Layer",  self._build_layer_menu),
+            ("Select", self._build_select_menu),
+            ("Filter", self._build_filter_menu),
+            ("View",   self._build_view_menu),
+            ("Window", self._build_window_menu),
+        ]:
+            btn = Gtk.MenuButton(label=label)
+            btn.add_css_class("pigment-menu-btn")
+            btn.set_popover(builder())
+            header.pack_start(btn)
 
-        new_btn = Gtk.Button(label="New")
-        new_btn.add_css_class("flat")
-        new_btn.connect("clicked", self._on_new_document)
-        open_btn = Gtk.Button(label="Open")
-        open_btn.add_css_class("flat")
-        open_btn.connect("clicked", self._on_open_file)
-        save_btn = Gtk.Button(label="Save")
-        save_btn.add_css_class("flat")
-        save_btn.connect("clicked", self._on_save_file)
-        header.pack_start(new_btn)
-        header.pack_start(open_btn)
-        header.pack_start(save_btn)
-
+        header.set_title_widget(Gtk.Box())  # hide default title
         return header
 
-    # ── OPTIONS BAR ─────────────────────────────────────────────────────────
+    # ── MENU BUILDERS ────────────────────────────────────────────────────────
+    def _make_popover(self, items):
+        """items: list of (label, callback) or None for separator"""
+        pop = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.set_margin_top(4); box.set_margin_bottom(4)
+        box.set_margin_start(4); box.set_margin_end(4)
+        for item in items:
+            if item is None:
+                sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+                sep.set_margin_top(3); sep.set_margin_bottom(3)
+                box.append(sep)
+            else:
+                label, cb, *rest = item
+                danger = rest[0] if rest else False
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+                lbl = Gtk.Label(label=label, xalign=0)
+                lbl.set_hexpand(True)
+                row.append(lbl)
+                if len(rest) > 1:
+                    kbd = Gtk.Label(label=rest[1])
+                    kbd.add_css_class("pigment-ob-label")
+                    row.append(kbd)
+                btn = Gtk.Button()
+                btn.set_child(row)
+                btn.add_css_class("flat")
+                if danger:
+                    btn.add_css_class("pigment-menu-danger")
+                if cb:
+                    btn.connect("clicked", lambda b, c=cb, p=pop: (p.popdown(), c()))
+                box.append(btn)
+        pop.set_child(box)
+        return pop
+
+    def _build_file_menu(self):
+        return self._make_popover([
+            ("New",       self._on_new_document,  False, "Ctrl+N"),
+            ("Open…",     self._on_open_file,      False, "Ctrl+O"),
+            None,
+            ("Save",      self._on_save_file,      False, "Ctrl+S"),
+            ("Save As…",  self._on_save_file,      False, "⇧Ctrl+S"),
+            None,
+            ("Export PNG…", self._on_save_file,    False),
+            None,
+            ("Quit",      self._on_quit,           True,  "Ctrl+Q"),
+        ])
+
+    def _build_edit_menu(self):
+        return self._make_popover([
+            ("Undo",  None, False, "Ctrl+Z"),
+            ("Redo",  None, False, "⇧Ctrl+Z"),
+        ])
+
+    def _build_image_menu(self):
+        return self._make_popover([
+            ("Canvas Size…", None),
+            ("Rotate 90° CW", None),
+            ("Rotate 90° CCW", None),
+            ("Flip Horizontal", None),
+        ])
+
+    def _build_layer_menu(self):
+        return self._make_popover([
+            ("New Layer",    None, False, "⇧Ctrl+N"),
+            ("Duplicate",    None),
+            ("Merge Down",   None, False, "Ctrl+E"),
+            ("Flatten Image", None),
+        ])
+
+    def _build_select_menu(self):
+        return self._make_popover([
+            ("All",    None, False, "Ctrl+A"),
+            ("Deselect", None, False, "Ctrl+D"),
+            ("Invert", None, False, "⇧Ctrl+I"),
+        ])
+
+    def _build_filter_menu(self):
+        return self._make_popover([
+            ("Gaussian Blur…", None),
+            ("Sharpen",        None),
+            None,
+            ("Levels…",        None),
+            ("Curves…",        None),
+        ])
+
+    def _build_view_menu(self):
+        return self._make_popover([
+            ("Zoom In",     None, False, "Ctrl++"),
+            ("Zoom Out",    None, False, "Ctrl+-"),
+            ("Fit to Window", None, False, "Ctrl+0"),
+            ("Actual Size", None, False, "Ctrl+1"),
+            None,
+            ("Rulers",      None),
+            ("Grid",        None),
+        ])
+
+    def _build_window_menu(self):
+        return self._make_popover([
+            ("Toggle Panels",  self._toggle_panels),
+            ("Toggle Toolbox", None),
+            None,
+            ("Dark Mode",  self._toggle_theme),
+            ("Light Mode", self._toggle_theme),
+        ])
+
+    def _on_quit(self):
+        self.get_application().quit()
+
+    # ── OPTIONS BAR ──────────────────────────────────────────────────────────
     def _build_optionsbar(self):
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
         bar.add_css_class("pigment-optionsbar")
-        bar.set_margin_start(8)
-        bar.set_margin_end(8)
+        bar.set_margin_start(10); bar.set_margin_end(10)
 
         self._tool_chip = Gtk.Label(label="🖌  Brush")
         self._tool_chip.add_css_class("pigment-tool-chip")
         bar.append(self._tool_chip)
         bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
+        self._ob_entries = {}
         for label, value, width in [
             ("Size", "19", 4), ("Hardness", "80%", 5),
             ("Opacity", "85%", 5), ("Flow", "100%", 5),
@@ -91,6 +204,7 @@ class PigmentWindow(Adw.ApplicationWindow):
             entry.set_width_chars(width)
             entry.add_css_class("pigment-ob-entry")
             entry.connect("activate", self._on_ob_entry_changed, label)
+            self._ob_entries[label] = entry
             bar.append(lbl)
             bar.append(entry)
             bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
@@ -104,125 +218,197 @@ class PigmentWindow(Adw.ApplicationWindow):
         bar.append(mode_lbl)
         bar.append(mode_drop)
 
-        # Zoom display on the far right
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
+        spacer = Gtk.Box(); spacer.set_hexpand(True)
         bar.append(spacer)
+
         self._zoom_label = Gtk.Label(label="–")
         self._zoom_label.add_css_class("pigment-ob-label")
-        zoom_out_btn = Gtk.Button(label="−")
-        zoom_out_btn.add_css_class("flat")
-        zoom_out_btn.connect("clicked", lambda _: self._canvas.zoom_out())
-        zoom_in_btn = Gtk.Button(label="+")
-        zoom_in_btn.add_css_class("flat")
-        zoom_in_btn.connect("clicked", lambda _: self._canvas.zoom_in())
-        fit_btn = Gtk.Button(label="Fit")
-        fit_btn.add_css_class("flat")
+        zoom_out = Gtk.Button(label="−"); zoom_out.add_css_class("flat")
+        zoom_out.connect("clicked", lambda _: self._canvas.zoom_out())
+        zoom_in = Gtk.Button(label="+"); zoom_in.add_css_class("flat")
+        zoom_in.connect("clicked", lambda _: self._canvas.zoom_in())
+        fit_btn = Gtk.Button(label="Fit"); fit_btn.add_css_class("flat")
         fit_btn.connect("clicked", lambda _: self._canvas.zoom_fit())
-        bar.append(zoom_out_btn)
+        bar.append(zoom_out)
         bar.append(self._zoom_label)
-        bar.append(zoom_in_btn)
+        bar.append(zoom_in)
         bar.append(fit_btn)
-
         return bar
 
-    # ── TOOLBOX ─────────────────────────────────────────────────────────────
-    def _build_toolbox(self):
-        scroll = Gtk.ScrolledWindow()
-        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroll.add_css_class("pigment-toolbox")
-        scroll.set_size_request(44, -1)
+    # ── TAB BAR ──────────────────────────────────────────────────────────────
+    def _build_tabbar(self):
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+        bar.add_css_class("pigment-tabbar")
+        bar.set_margin_start(8)
+        self._tab_bar = bar
+        return bar
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        box.set_margin_top(6)
-        box.set_margin_bottom(6)
-        box.set_margin_start(5)
-        box.set_margin_end(5)
+    # ── TOOLBOX ──────────────────────────────────────────────────────────────
+    def _build_toolbox(self):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.add_css_class("pigment-toolbox")
+        outer.set_size_request(82, -1)
+
+        # Drag handle
+        handle = Gtk.Label(label="· · ·")
+        handle.add_css_class("pigment-ob-label")
+        handle.set_margin_top(4); handle.set_margin_bottom(4)
+        outer.append(handle)
+
+        # Tool grid — 3 columns
+        grid = Gtk.Grid()
+        grid.set_row_spacing(2)
+        grid.set_column_spacing(2)
 
         tools = [
-            ("⊹","Move (V)","move"),         ("⬚","Marquee (M)","marquee"),
-            ("⌖","Lasso (L)","lasso"),        ("✦","Magic Wand (W)","wand"),
-            None,
-            ("⌗","Crop (C)","crop"),          ("⧉","Slice (K)","slice"),
-            None,
-            ("✚","Healing Brush (J)","heal"), ("🖌","Brush (B)","brush"),
-            ("⎘","Clone Stamp (S)","clone"),  ("◻","Eraser (E)","eraser"),
-            None,
-            ("▦","Gradient (G)","gradient"),  ("⬡","Paint Bucket","bucket"),
-            None,
-            ("◎","Blur/Sharpen (R)","blur"),  ("◑","Dodge/Burn (O)","dodge"),
-            None,
-            ("✒","Pen (P)","pen"),            ("T","Type (T)","type"),
+            ("⊹","Move (V)","move"),
+            ("⬚","Marquee (M)","marquee"),
+            ("⌖","Lasso (L)","lasso"),
+            ("✦","Magic Wand (W)","wand"),
+            ("⌗","Crop (C)","crop"),
+            ("⧉","Slice (K)","slice"),
+            ("✚","Healing Brush (J)","heal"),
+            ("🖌","Brush (B)","brush"),
+            ("⎘","Clone Stamp (S)","clone"),
+            ("◻","Eraser (E)","eraser"),
+            ("▦","Gradient (G)","gradient"),
+            ("⬡","Paint Bucket","bucket"),
+            ("◎","Blur/Sharpen (R)","blur"),
+            ("◑","Dodge/Burn (O)","dodge"),
+            ("✒","Pen (P)","pen"),
+            ("T","Type (T)","type"),
             ("▭","Shape (U)","shape"),
-            None,
-            ("✥","Hand (H)","hand"),          ("⊕","Zoom (Z)","zoom"),
+            ("✥","Hand (H)","hand"),
+            ("⊕","Zoom (Z)","zoom"),
         ]
 
         self._tool_buttons = {}
         self._active_tool_id = None
-
-        for item in tools:
-            if item is None:
-                sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
-                sep.set_margin_top(3)
-                sep.set_margin_bottom(3)
-                box.append(sep)
-                continue
-            icon, tooltip, tool_id = item
+        cols = 3
+        for i, (icon, tooltip, tool_id) in enumerate(tools):
             btn = Gtk.Button(label=icon)
             btn.set_tooltip_text(tooltip)
             btn.add_css_class("pigment-tool-btn")
             btn.connect("clicked", self._on_tool_clicked, tool_id)
             self._tool_buttons[tool_id] = btn
-            box.append(btn)
+            grid.attach(btn, i % cols, i // cols, 1, 1)
 
+        outer.append(grid)
         self._set_active_tool("brush")
 
-        box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        swatch_lbl = Gtk.Label(label="FG/BG")
-        swatch_lbl.add_css_class("pigment-ob-label")
-        box.append(swatch_lbl)
+        # FG/BG swatches
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(6)
+        outer.append(sep)
+        swatch_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        swatch_box.set_margin_top(6)
+        swatch_box.set_halign(Gtk.Align.CENTER)
+        fg_lbl = Gtk.Label(label="FG/BG")
+        fg_lbl.add_css_class("pigment-ob-label")
+        swatch_box.append(fg_lbl)
+        outer.append(swatch_box)
 
-        scroll.set_child(box)
-        return scroll
+        return outer
 
-    # ── CANVAS AREA ─────────────────────────────────────────────────────────
+    # ── CANVAS AREA ──────────────────────────────────────────────────────────
     def _build_canvas_area(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.set_hexpand(True)
-        box.set_vexpand(True)
+        box.set_hexpand(True); box.set_vexpand(True)
+        box.add_css_class("pigment-canvas-bg")
 
-        # Document tab bar
-        self._tab_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
-        self._tab_bar.add_css_class("pigment-tabbar")
-        box.append(self._tab_bar)
-
-        # The real Cairo canvas
         self._canvas = PigmentCanvas()
         self._canvas.on_zoom_changed = self._on_zoom_changed
         box.append(self._canvas)
-
         return box
 
-    # ── RIGHT PANELS ─────────────────────────────────────────────────────────
-    def _build_panels(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.add_css_class("pigment-panels")
-        box.set_size_request(220, -1)
+    # ── RIGHT PANEL ──────────────────────────────────────────────────────────
+    def _build_right_panel(self):
+        self._right_panel_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._right_panel_box.add_css_class("pigment-panels")
+        self._right_panel_box.set_size_request(256, -1)
 
-        notebook = Gtk.Notebook()
-        notebook.set_vexpand(True)
+        # Panel titlebar
+        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        title_row.add_css_class("pigment-panel-titlebar")
+        title_row.set_margin_start(10); title_row.set_margin_end(10)
+        title_lbl = Gtk.Label(label="Panels")
+        title_lbl.add_css_class("pigment-panel-title")
+        title_lbl.set_hexpand(True); title_lbl.set_xalign(0)
+        hide_btn = Gtk.Button(label="⟩")
+        hide_btn.add_css_class("pigment-panel-hide-btn")
+        hide_btn.connect("clicked", self._toggle_panels)
+        title_row.append(title_lbl)
+        title_row.append(hide_btn)
+        self._right_panel_box.append(title_row)
 
-        # Navigator
-        nav_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        nav_box.set_margin_top(8); nav_box.set_margin_bottom(8)
-        nav_box.set_margin_start(8); nav_box.set_margin_end(8)
+        # Scrollable accordion body
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+
+        acc_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        acc_box.append(self._build_accordion("Navigator", self._build_navigator_body()))
+        acc_box.append(self._build_accordion("Color",     self._build_color_body()))
+        acc_box.append(self._build_accordion("History",   self._build_history_body()))
+        acc_box.append(self._build_accordion("Layers",    self._build_layers_body()))
+        scroll.set_child(acc_box)
+        self._right_panel_box.append(scroll)
+
+        return self._right_panel_box
+
+    def _build_accordion(self, title, body_widget):
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        outer.append(sep)
+
+        # Header button
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header_box.set_margin_start(12); header_box.set_margin_end(12)
+        arrow = Gtk.Label(label="▶")
+        arrow.add_css_class("pigment-ob-label")
+        lbl = Gtk.Label(label=title)
+        lbl.add_css_class("pigment-panel-title")
+        lbl.set_xalign(0); lbl.set_hexpand(True)
+        header_box.append(arrow)
+        header_box.append(lbl)
+
+        header_btn = Gtk.Button()
+        header_btn.set_child(header_box)
+        header_btn.add_css_class("flat")
+        header_btn.add_css_class("pigment-acc-header")
+
+        # Body revealer
+        rev = Gtk.Revealer()
+        rev.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        rev.set_reveal_child(True)
+        body_wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        body_wrapper.add_css_class("pigment-acc-body")
+        body_wrapper.append(body_widget)
+        rev.set_child(body_wrapper)
+
+        def on_toggle(_btn, revealer=rev, arr=arrow):
+            open_ = revealer.get_reveal_child()
+            revealer.set_reveal_child(not open_)
+            arr.set_label("▶" if open_ else "▼")
+
+        header_btn.connect("clicked", on_toggle)
+
+        outer.append(header_btn)
+        outer.append(rev)
+        return outer
+
+    # ── ACCORDION BODIES ─────────────────────────────────────────────────────
+
+    def _build_navigator_body(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+
         self._nav_thumb = Gtk.DrawingArea()
-        self._nav_thumb.set_size_request(-1, 90)
+        self._nav_thumb.set_size_request(-1, 86)
         self._nav_thumb.add_css_class("pigment-nav-thumb")
         self._nav_thumb.set_draw_func(self._draw_nav_thumb)
-        nav_box.append(self._nav_thumb)
-        zoom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        box.append(self._nav_thumb)
+
+        zoom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         zoom_row.append(Gtk.Label(label="−"))
         self._nav_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 5, 3200, 1)
         self._nav_slider.set_value(100)
@@ -232,44 +418,36 @@ class PigmentWindow(Adw.ApplicationWindow):
         zoom_row.append(self._nav_slider)
         zoom_row.append(Gtk.Label(label="+"))
         self._nav_zoom_label = Gtk.Label(label="100%")
+        self._nav_zoom_label.add_css_class("pigment-ob-label")
         zoom_row.append(self._nav_zoom_label)
-        nav_box.append(zoom_row)
-        notebook.append_page(nav_box, Gtk.Label(label="Navigator"))
+        box.append(zoom_row)
+        return box
 
-        # Color
-        color_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        color_box.set_margin_top(8); color_box.set_margin_bottom(8)
-        color_box.set_margin_start(8); color_box.set_margin_end(8)
+    def _build_color_body(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
-        # Color preview swatch
         self._color_swatch = Gtk.DrawingArea()
-        self._color_swatch.set_size_request(-1, 36)
+        self._color_swatch.set_size_request(-1, 34)
+        self._color_swatch.add_css_class("pigment-color-swatch")
         self._color_swatch.set_draw_func(self._draw_color_swatch)
-        color_box.append(self._color_swatch)
+        box.append(self._color_swatch)
 
-        # RGB sliders
-        self._color_rgb = [0, 0, 0]
-        self._rgb_value_labels = {}
-        self._rgb_sliders = {}
-        for ch_name, idx in [("R", 0), ("G", 1), ("B", 2)]:
+        for ch, idx in [("R", 0), ("G", 1), ("B", 2)]:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            lbl = Gtk.Label(label=ch_name)
-            lbl.set_size_request(14, -1)
-            row.append(lbl)
+            lbl = Gtk.Label(label=ch)
+            lbl.add_css_class("pigment-ob-label")
+            lbl.set_size_request(12, -1)
             sl = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 255, 1)
-            sl.set_value(0)
-            sl.set_hexpand(True)
-            sl.set_draw_value(False)
+            sl.set_value(0); sl.set_hexpand(True); sl.set_draw_value(False)
             sl.connect("value-changed", self._on_rgb_slider, idx)
             self._rgb_sliders[idx] = sl
-            row.append(sl)
             val_lbl = Gtk.Label(label="0")
+            val_lbl.add_css_class("pigment-ob-label")
             val_lbl.set_size_request(28, -1)
             self._rgb_value_labels[idx] = val_lbl
-            row.append(val_lbl)
-            color_box.append(row)
+            row.append(lbl); row.append(sl); row.append(val_lbl)
+            box.append(row)
 
-        # Hex entry
         hex_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         hex_row.append(Gtk.Label(label="#"))
         self._hex_entry = Gtk.Entry()
@@ -278,47 +456,109 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._hex_entry.set_max_length(6)
         self._hex_entry.connect("activate", self._on_hex_entry)
         hex_row.append(self._hex_entry)
-        color_box.append(hex_row)
+        box.append(hex_row)
+        return box
 
-        notebook.append_page(color_box, Gtk.Label(label="Color"))
+    def _build_history_body(self):
+        self._history_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        placeholder = Gtk.Label(label="No history yet")
+        placeholder.add_css_class("pigment-ob-label")
+        self._history_list.append(placeholder)
+        return self._history_list
 
-        # History
-        hist_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        hist_box.set_margin_top(8); hist_box.set_margin_bottom(8)
-        hist_box.set_margin_start(8); hist_box.set_margin_end(8)
-        self._history_box = hist_box
-        notebook.append_page(hist_box, Gtk.Label(label="History"))
+    def _build_layers_body(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
 
-        # Layers
-        layers_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        layers_box.set_margin_top(8); layers_box.set_margin_bottom(8)
-        layers_box.set_margin_start(8); layers_box.set_margin_end(8)
+        top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
         blend_strings = Gtk.StringList.new(["Normal","Multiply","Screen","Overlay"])
         blend_drop = Gtk.DropDown(model=blend_strings)
         blend_drop.set_hexpand(True)
-        layers_box.append(blend_drop)
-        self._layers_box = layers_box
-        notebook.append_page(layers_box, Gtk.Label(label="Layers"))
+        top_row.append(blend_drop)
+        box.append(top_row)
 
-        box.append(notebook)
+        self._layers_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.append(self._layers_list)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        for label in ["+ New", "⊕ Dup", "🗑"]:
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("flat")
+            btn.set_hexpand(True)
+            actions.append(btn)
+        box.append(actions)
         return box
 
-    # ── STATUS BAR ──────────────────────────────────────────────────────────
+    # ── STATUS BAR ───────────────────────────────────────────────────────────
     def _build_statusbar(self):
-        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         bar.add_css_class("pigment-statusbar")
         bar.set_margin_start(12); bar.set_margin_end(12)
-        self._status_doc   = Gtk.Label(label='Pigment 0.1 "Buzz"')
-        self._status_info  = Gtk.Label(label="Python 3.13 · GTK 4.18")
+
+        self._status_doc  = Gtk.Label(label='Pigment 0.1 "Buzz"')
+        self._status_info = Gtk.Label(label="Python 3.13 · GTK 4.18")
         self._status_coord = Gtk.Label(label="No document open")
         for w in [self._status_doc, self._status_info, self._status_coord]:
+            w.add_css_class("pigment-status-label")
             bar.append(w)
             bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        spacer = Gtk.Box(); spacer.set_hexpand(True)
+        bar.append(spacer)
+
+        accent = Gtk.Label(label='Pigment 0.1 "Buzz"')
+        accent.add_css_class("pigment-status-accent")
+        bar.append(accent)
         return bar
 
-    # ── FILE I/O ──────────────────────────────────────────────────────────────
+    # ── DOCUMENT ─────────────────────────────────────────────────────────────
+    def _on_new_document(self):
+        dialog = Adw.MessageDialog(transient_for=self, heading="New Document",
+                                   body="Enter canvas dimensions:")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("create", "Create")
+        dialog.set_response_appearance("create", Adw.ResponseAppearance.SUGGESTED)
 
-    def _on_save_file(self, _btn):
+        grid = Gtk.Grid(column_spacing=8, row_spacing=6)
+        grid.set_margin_top(8)
+        grid.attach(Gtk.Label(label="Width",  xalign=0), 0, 0, 1, 1)
+        grid.attach(Gtk.Label(label="Height", xalign=0), 0, 1, 1, 1)
+        w_entry = Gtk.Entry(); w_entry.set_text("1920"); w_entry.set_width_chars(8)
+        h_entry = Gtk.Entry(); h_entry.set_text("1080"); h_entry.set_width_chars(8)
+        grid.attach(w_entry, 1, 0, 1, 1); grid.attach(h_entry, 1, 1, 1, 1)
+        grid.attach(Gtk.Label(label="px", xalign=0), 2, 0, 1, 1)
+        grid.attach(Gtk.Label(label="px", xalign=0), 2, 1, 1, 1)
+        dialog.set_extra_child(grid)
+
+        def on_response(dlg, response):
+            if response == "create":
+                try:
+                    w = max(1, min(16000, int(w_entry.get_text())))
+                    h = max(1, min(16000, int(h_entry.get_text())))
+                except ValueError:
+                    return
+                self._create_document(w, h)
+            dialog.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _create_document(self, width, height):
+        doc = Document(width, height, name="Untitled")
+        self._documents.append(doc)
+        self._active_doc = doc
+
+        tab_btn = Gtk.Button(label=f"{doc.name}  ×")
+        tab_btn.add_css_class("flat")
+        tab_btn.add_css_class("pigment-tab-btn")
+        self._tab_bar.append(tab_btn)
+
+        self._canvas.set_document(doc)
+        self._status_doc.set_text(f"{doc.name} — {width}×{height} px")
+        self._status_info.set_text("RGB 8-bit")
+        self._zoom_label.set_text(f"{self._canvas.zoom_percent:.1f}%")
+
+    # ── FILE I/O ──────────────────────────────────────────────────────────────
+    def _on_save_file(self):
         if not self._active_doc:
             return
         dialog = Gtk.FileDialog.new()
@@ -343,7 +583,6 @@ class PigmentWindow(Adw.ApplicationWindow):
         if not path.endswith(".png"):
             path += ".png"
         from PIL import Image
-        import numpy as np
         pixels = self._active_doc.pixels
         img = Image.fromarray(pixels[:, :, :3], "RGB")
         img.save(path)
@@ -351,7 +590,7 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._active_doc.modified = False
         self._status_doc.set_text(f"{self._active_doc.name} — saved")
 
-    def _on_open_file(self, _btn):
+    def _on_open_file(self):
         dialog = Gtk.FileDialog.new()
         dialog.set_title("Open image")
         png_filter = Gtk.FileFilter()
@@ -388,76 +627,15 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._status_info.set_text("RGB 8-bit")
         self._zoom_label.set_text(f"{self._canvas.zoom_percent:.1f}%")
 
-    # ── NEW DOCUMENT DIALOG ──────────────────────────────────────────────────
-    def _on_new_document(self, _btn):
-        dialog = Adw.MessageDialog(
-            transient_for=self,
-            heading="New Document",
-            body="Enter the canvas dimensions:",
-        )
-        dialog.add_response("cancel", "Cancel")
-        dialog.add_response("create", "Create")
-        dialog.set_response_appearance("create", Adw.ResponseAppearance.SUGGESTED)
-
-        # Width / Height entries
-        grid = Gtk.Grid(column_spacing=8, row_spacing=6)
-        grid.set_margin_top(8)
-        grid.attach(Gtk.Label(label="Width",  xalign=0), 0, 0, 1, 1)
-        grid.attach(Gtk.Label(label="Height", xalign=0), 0, 1, 1, 1)
-        w_entry = Gtk.Entry(); w_entry.set_text("1920"); w_entry.set_width_chars(8)
-        h_entry = Gtk.Entry(); h_entry.set_text("1080"); h_entry.set_width_chars(8)
-        grid.attach(w_entry, 1, 0, 1, 1)
-        grid.attach(h_entry, 1, 1, 1, 1)
-        grid.attach(Gtk.Label(label="px", xalign=0), 2, 0, 1, 1)
-        grid.attach(Gtk.Label(label="px", xalign=0), 2, 1, 1, 1)
-        dialog.set_extra_child(grid)
-
-        def on_response(dlg, response):
-            if response == "create":
-                try:
-                    w = max(1, min(16000, int(w_entry.get_text())))
-                    h = max(1, min(16000, int(h_entry.get_text())))
-                except ValueError:
-                    return
-                self._create_document(w, h)
-            dialog.destroy()
-
-        dialog.connect("response", on_response)
-        dialog.present()
-
-    def _create_document(self, width: int, height: int):
-        doc = Document(width, height, name="Untitled")
-        self._documents.append(doc)
-        self._active_doc = doc
-
-        # Add a tab
-        tab_btn = Gtk.Button(label=f"{doc.name}  ×")
-        tab_btn.add_css_class("flat")
-        tab_btn.add_css_class("pigment-tab-btn")
-        tab_btn.connect("clicked", lambda _: None)
-        self._tab_bar.append(tab_btn)
-
-        # Send to canvas
-        self._canvas.set_document(doc)
-
-        # Update status
-        self._status_doc.set_text(f"{doc.name} — {width}×{height} px")
-        self._status_info.set_text("RGB 8-bit")
-        self._zoom_label.set_text(f"{self._canvas.zoom_percent:.1f}%")
-
-    # ── NAVIGATOR THUMB ──────────────────────────────────────────────────────
+    # ── NAVIGATOR ────────────────────────────────────────────────────────────
     def _draw_nav_thumb(self, area, cr, width, height):
         if not self._active_doc:
             cr.set_source_rgb(0.55, 0.38, 0.25)
             cr.paint()
             return
-        # Draw the document pixels scaled into the thumb
-        import cairo as _cairo
         doc = self._active_doc
         surf = self._canvas._numpy_to_cairo(doc.pixels)
-        scale_x = width  / doc.width
-        scale_y = height / doc.height
-        scale   = min(scale_x, scale_y)
+        scale = min(width / doc.width, height / doc.height)
         ox = (width  - doc.width  * scale) / 2
         oy = (height - doc.height * scale) / 2
         cr.set_source_rgb(0.2, 0.2, 0.2)
@@ -469,59 +647,40 @@ class PigmentWindow(Adw.ApplicationWindow):
         cr.paint()
         cr.restore()
 
-    # ── ZOOM SYNC ────────────────────────────────────────────────────────────
-    def _on_zoom_changed(self, zoom: float):
+    def _on_zoom_changed(self, zoom):
         pct = zoom * 100
         self._zoom_label.set_text(f"{pct:.1f}%")
         self._nav_zoom_label.set_text(f"{pct:.1f}%")
-        # Prevent slider feedback loop
         self._nav_slider.handler_block_by_func(self._on_nav_slider)
         self._nav_slider.set_value(pct)
         self._nav_slider.handler_unblock_by_func(self._on_nav_slider)
         self._nav_thumb.queue_draw()
 
     def _on_nav_slider(self, slider):
-        zoom = slider.get_value() / 100.0
-        self._canvas._set_zoom(zoom, center=True)
+        self._canvas._set_zoom(slider.get_value() / 100.0, center=True)
 
-    # ── TOOL SWITCHING ───────────────────────────────────────────────────────
-    def _on_tool_clicked(self, btn, tool_id):
-        self._set_active_tool(tool_id)
-
-    def _set_active_tool(self, tool_id):
-        if self._active_tool_id and self._active_tool_id in self._tool_buttons:
-            self._tool_buttons[self._active_tool_id].remove_css_class("pigment-tool-active")
-        self._active_tool_id = tool_id
-        if tool_id in self._tool_buttons:
-            self._tool_buttons[tool_id].add_css_class("pigment-tool-active")
-
-    # ── COLOR PICKER ─────────────────────────────────────────────────────────
-
+    # ── COLOR ────────────────────────────────────────────────────────────────
     def _draw_color_swatch(self, area, cr, width, height):
         r, g, b = [v / 255.0 for v in self._color_rgb]
         cr.set_source_rgb(r, g, b)
         cr.paint()
-        # Border
-        cr.set_source_rgba(0, 0, 0, 0.2)
+        cr.set_source_rgba(0, 0, 0, 0.15)
         cr.set_line_width(1)
         cr.rectangle(0, 0, width, height)
         cr.stroke()
 
-    def _on_rgb_slider(self, slider, channel_idx):
+    def _on_rgb_slider(self, slider, idx):
         val = int(slider.get_value())
-        self._color_rgb[channel_idx] = val
-        self._rgb_value_labels[channel_idx].set_text(str(val))
+        self._color_rgb[idx] = val
+        self._rgb_value_labels[idx].set_text(str(val))
         self._sync_color()
 
     def _on_hex_entry(self, entry):
         text = entry.get_text().strip().lstrip("#")
         if len(text) == 6:
             try:
-                r = int(text[0:2], 16)
-                g = int(text[2:4], 16)
-                b = int(text[4:6], 16)
+                r, g, b = int(text[0:2],16), int(text[2:4],16), int(text[4:6],16)
                 self._color_rgb = [r, g, b]
-                # Update sliders without triggering their callbacks
                 for idx, val in enumerate([r, g, b]):
                     self._rgb_sliders[idx].handler_block_by_func(self._on_rgb_slider)
                     self._rgb_sliders[idx].set_value(val)
@@ -535,9 +694,20 @@ class PigmentWindow(Adw.ApplicationWindow):
         r, g, b = self._color_rgb
         self._canvas._brush_color = (r, g, b)
         self._color_swatch.queue_draw()
-        # Update hex entry
         self._hex_entry.set_text(f"{r:02x}{g:02x}{b:02x}")
 
+    # ── TOOLS ────────────────────────────────────────────────────────────────
+    def _on_tool_clicked(self, btn, tool_id):
+        self._set_active_tool(tool_id)
+
+    def _set_active_tool(self, tool_id):
+        if self._active_tool_id and self._active_tool_id in self._tool_buttons:
+            self._tool_buttons[self._active_tool_id].remove_css_class("pigment-tool-active")
+        self._active_tool_id = tool_id
+        if tool_id in self._tool_buttons:
+            self._tool_buttons[tool_id].add_css_class("pigment-tool-active")
+
+    # ── OB ENTRIES ───────────────────────────────────────────────────────────
     def _on_ob_entry_changed(self, entry, label):
         text = entry.get_text().replace("%", "").strip()
         try:
@@ -549,13 +719,15 @@ class PigmentWindow(Adw.ApplicationWindow):
         elif label == "Opacity":
             self._canvas._brush_opacity = min(1.0, val / 100.0)
 
-    # ── THEME TOGGLE ─────────────────────────────────────────────────────────
-    def _toggle_theme(self, btn):
-        self._dark = not self._dark
+    # ── PANEL TOGGLE ─────────────────────────────────────────────────────────
+    def _toggle_panels(self, *_):
+        self._panel_visible = not self._panel_visible
+        self._right_panel_box.set_visible(self._panel_visible)
+
+    # ── THEME ────────────────────────────────────────────────────────────────
+    def _toggle_theme(self, *_):
         manager = Adw.StyleManager.get_default()
-        if self._dark:
-            manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
-            self._theme_btn.set_label("☀  Light")
-        else:
+        if manager.get_color_scheme() == Adw.ColorScheme.FORCE_DARK:
             manager.set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)
-            self._theme_btn.set_label("☾  Dark")
+        else:
+            manager.set_color_scheme(Adw.ColorScheme.FORCE_DARK)
