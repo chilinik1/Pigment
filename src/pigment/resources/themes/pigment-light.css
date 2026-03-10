@@ -1,0 +1,101 @@
+/* Pigment — flat warm-light GTK 4 theme */
+
+.pigment-logo-mark {
+  font-weight: bold;
+  font-size: 13px;
+  background: #7c5cbf;
+  color: white;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.pigment-logo-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.pigment-logo-version {
+  font-size: 10px;
+  opacity: 0.5;
+}
+.pigment-optionsbar {
+  border-bottom: 1px solid @borders;
+  padding: 3px 0;
+  min-height: 34px;
+}
+.pigment-tool-chip {
+  font-size: 11px;
+  font-weight: bold;
+  padding: 2px 8px;
+  border-radius: 5px;
+  background: alpha(@accent_bg_color, 0.12);
+  color: @accent_color;
+}
+.pigment-ob-label {
+  font-size: 11px;
+  opacity: 0.6;
+}
+.pigment-ob-entry {
+  font-size: 11px;
+  min-height: 24px;
+  min-width: 10px;
+}
+.pigment-canvas-area {
+  background: #c8c4bc;
+}
+.pigment-toolbox {
+  border-right: 1px solid @borders;
+  background: @headerbar_bg_color;
+}
+.pigment-tool-btn {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 14px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+.pigment-tool-btn:hover {
+  background: alpha(@accent_bg_color, 0.1);
+  border-color: @borders;
+}
+.pigment-tool-active {
+  background: alpha(@accent_bg_color, 0.18);
+  color: @accent_color;
+  border-color: @accent_color;
+}
+.pigment-panels {
+  border-left: 1px solid @borders;
+  background: @headerbar_bg_color;
+}
+.pigment-layer-row {
+  padding: 3px 2px;
+  border-radius: 5px;
+}
+.pigment-layer-row:hover {
+  background: alpha(@accent_bg_color, 0.08);
+}
+.pigment-layer-thumb {
+  background: @card_bg_color;
+  border: 1px solid @borders;
+  border-radius: 3px;
+}
+.pigment-layer-name {
+  font-size: 11px;
+  font-weight: 500;
+}
+.pigment-layer-meta {
+  font-size: 9px;
+  opacity: 0.5;
+}
+.pigment-nav-thumb {
+  background: #8c6040;
+  border: 1px solid @borders;
+  border-radius: 4px;
+}
+.pigment-statusbar {
+  border-top: 1px solid @borders;
+  min-height: 22px;
+  padding: 2px 0;
+  font-size: 10px;
+  opacity: 0.6;
+}
