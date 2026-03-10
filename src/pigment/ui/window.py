@@ -85,6 +85,7 @@ class PigmentWindow(Adw.ApplicationWindow):
             entry.set_text(value)
             entry.set_width_chars(width)
             entry.add_css_class("pigment-ob-entry")
+                entry.connect("activate", self._on_ob_entry_changed, label)
             bar.append(lbl)
             bar.append(entry)
             bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
@@ -384,6 +385,17 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._active_tool_id = tool_id
         if tool_id in self._tool_buttons:
             self._tool_buttons[tool_id].add_css_class("pigment-tool-active")
+
+    def _on_ob_entry_changed(self, entry, label):
+        text = entry.get_text().replace("%", "").strip()
+        try:
+            val = float(text)
+        except ValueError:
+            return
+        if label == "Size":
+            self._canvas._brush_radius = val / 2.0
+        elif label == "Opacity":
+            self._canvas._brush_opacity = min(1.0, val / 100.0)
 
     # ── THEME TOGGLE ─────────────────────────────────────────────────────────
     def _toggle_theme(self, btn):

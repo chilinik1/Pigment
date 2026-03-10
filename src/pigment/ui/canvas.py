@@ -46,6 +46,14 @@ class PigmentCanvas(Gtk.DrawingArea):
         # Notify callback — called when zoom changes so window can update label
         self.on_zoom_changed = None
 
+        # Brush state — updated by window when options bar changes
+        self._brush_radius  = 9.5    # half of size 19
+        self._brush_color   = (0, 0, 0)   # black
+        self._brush_opacity = 0.85
+        self._last_paint_x  = 0.0
+        self._last_paint_y  = 0.0
+        self._painting      = False
+
         # Drawing setup
         self.set_draw_func(self._draw)
         self.set_focusable(True)
@@ -318,6 +326,7 @@ class PigmentCanvas(Gtk.DrawingArea):
         return False
 
     def _on_drag_begin(self, gesture, start_x, start_y):
+        self.grab_focus()
         if self._space_held:
             self._panning = True
             self._pan_start_x  = start_x
@@ -325,12 +334,18 @@ class PigmentCanvas(Gtk.DrawingArea):
             self._pan_origin_x = self._offset_x
             self._pan_origin_y = self._offset_y
             self.set_cursor(self._cursor_panning)
+        else:
+            self._painting = True
+            self.start_paint(start_x, start_y)
 
     def _on_drag_update(self, gesture, offset_x, offset_y):
         if self._panning:
             self._offset_x = self._pan_origin_x + offset_x
             self._offset_y = self._pan_origin_y + offset_y
             self.queue_draw()
+        elif self._painting:
+            sx, sy = gesture.get_start_point()
+            self.continue_paint(sx + offset_x, sy + offset_y)
 
     def _on_drag_end(self, gesture, offset_x, offset_y):
         if self._panning:
@@ -338,3 +353,75 @@ class PigmentCanvas(Gtk.DrawingArea):
             self.set_cursor(
                 self._cursor_pan if self._space_held else self._cursor_default
             )
+        self._painting = False
+
+    # ── BRUSH PAINTING ───────────────────────────────────────────────────────
+
+    def start_paint(self, x: float, y: float):
+        """Begin a new brush stroke at widget coordinates (x, y)."""
+        self._last_paint_x, self._last_paint_y = self._widget_to_canvas(x, y)
+        self._paint_dab(self._last_paint_x, self._last_paint_y)
+
+    def continue_paint(self, x: float, y: float):
+        """Continue stroke to (x, y)."""
+        cx, cy = self._widget_to_canvas(x, y)
+        if self.document:
+            self.document.paint_stroke(
+                self._last_paint_x, self._last_paint_y,
+                cx, cy,
+                self._brush_radius,
+                self._brush_color,
+                self._brush_opacity,
+            )
+            self.mark_dirty()
+        self._last_paint_x, self._last_paint_y = cx, cy
+
+    def _paint_dab(self, cx: float, cy: float):
+        if self.document:
+            self.document.paint_circle(
+                cx, cy,
+                self._brush_radius,
+                self._brush_color,
+                self._brush_opacity,
+            )
+            self.mark_dirty()
+
+    def _widget_to_canvas(self, wx: float, wy: float):
+        """Convert widget pixel coordinates to canvas document coordinates."""
+        cx = (wx - self._offset_x) / self._zoom
+        cy = (wy - self._offset_y) / self._zoom
+        return cx, cy
+
+    # ── BRUSH PAINTING ───────────────────────────────────────────────────────
+
+    def start_paint(self, x: float, y: float):
+        self._last_paint_x, self._last_paint_y = self._widget_to_canvas(x, y)
+        self._paint_dab(self._last_paint_x, self._last_paint_y)
+
+    def continue_paint(self, x: float, y: float):
+        cx, cy = self._widget_to_canvas(x, y)
+        if self.document:
+            self.document.paint_stroke(
+                self._last_paint_x, self._last_paint_y,
+                cx, cy,
+                self._brush_radius,
+                self._brush_color,
+                self._brush_opacity,
+            )
+            self.mark_dirty()
+        self._last_paint_x, self._last_paint_y = cx, cy
+
+    def _paint_dab(self, cx: float, cy: float):
+        if self.document:
+            self.document.paint_circle(
+                cx, cy,
+                self._brush_radius,
+                self._brush_color,
+                self._brush_opacity,
+            )
+            self.mark_dirty()
+
+    def _widget_to_canvas(self, wx: float, wy: float):
+        cx = (wx - self._offset_x) / self._zoom
+        cy = (wy - self._offset_y) / self._zoom
+        return cx, cy
