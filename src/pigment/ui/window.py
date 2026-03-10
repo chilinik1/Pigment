@@ -30,9 +30,23 @@ class PigmentWindow(Adw.ApplicationWindow):
 
         workspace = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         workspace.set_vexpand(True)
-        workspace.append(self._build_toolbox())
-        workspace.append(self._build_canvas_area())
-        workspace.append(self._build_right_panel())
+
+        self._toolbox_widget = self._build_toolbox()
+        workspace.append(self._toolbox_widget)
+
+        # Paned gives resizable split between canvas and right panel
+        self._paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self._paned.set_hexpand(True)
+        self._paned.set_vexpand(True)
+        self._paned.set_position(900)
+        self._paned.set_start_child(self._build_canvas_area())
+        self._paned.set_end_child(self._build_right_panel())
+        self._paned.set_resize_start_child(True)
+        self._paned.set_resize_end_child(False)
+        self._paned.set_shrink_start_child(False)
+        self._paned.set_shrink_end_child(False)
+        workspace.append(self._paned)
+
         root.append(workspace)
 
         root.append(self._build_statusbar())
@@ -249,16 +263,27 @@ class PigmentWindow(Adw.ApplicationWindow):
         outer.add_css_class("pigment-toolbox")
         outer.set_size_request(82, -1)
 
-        # Drag handle
-        handle = Gtk.Label(label="· · ·")
-        handle.add_css_class("pigment-ob-label")
-        handle.set_margin_top(4); handle.set_margin_bottom(4)
-        outer.append(handle)
+        # Column switcher
+        col_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        col_row.set_halign(Gtk.Align.CENTER)
+        col_row.set_margin_top(4); col_row.set_margin_bottom(4)
+        self._col_buttons = {}
+        self._toolbox_cols = 3
+        for n in [1, 2, 3, 4]:
+            cb = Gtk.Button(label=str(n))
+            cb.add_css_class("pigment-tool-btn")
+            cb.set_size_request(18, 18)
+            cb.connect("clicked", self._on_toolbox_cols, n)
+            self._col_buttons[n] = cb
+            col_row.append(cb)
+        self._col_buttons[3].add_css_class("pigment-tool-active")
+        outer.append(col_row)
 
-        # Tool grid — 3 columns
-        grid = Gtk.Grid()
-        grid.set_row_spacing(2)
-        grid.set_column_spacing(2)
+        # Tool grid
+        self._tool_grid = Gtk.Grid()
+        self._tool_grid.set_row_spacing(2)
+        self._tool_grid.set_column_spacing(2)
+        grid = self._tool_grid
 
         tools = [
             ("⊹","Move (V)","move"),
@@ -293,7 +318,8 @@ class PigmentWindow(Adw.ApplicationWindow):
             self._tool_buttons[tool_id] = btn
             grid.attach(btn, i % cols, i // cols, 1, 1)
 
-        outer.append(grid)
+        self._tools_list = tools
+        outer.append(self._tool_grid)
         self._set_active_tool("brush")
 
         # FG/BG swatches
@@ -324,7 +350,6 @@ class PigmentWindow(Adw.ApplicationWindow):
         canvas_box.append(self._canvas)
         box.append(canvas_box)
 
-        # Thin toggle strip on the right edge of canvas
         self._panel_toggle_strip = Gtk.Button(label="⟨")
         self._panel_toggle_strip.add_css_class("flat")
         self._panel_toggle_strip.add_css_class("pigment-ob-label")
@@ -713,6 +738,29 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._hex_entry.set_text(f"{r:02x}{g:02x}{b:02x}")
 
     # ── TOOLS ────────────────────────────────────────────────────────────────
+    def _on_toolbox_cols(self, btn, cols):
+        self._toolbox_cols = cols
+        for n, b in self._col_buttons.items():
+            b.remove_css_class("pigment-tool-active")
+        self._col_buttons[cols].add_css_class("pigment-tool-active")
+
+        # Rebuild grid
+        # Remove all children
+        child = self._tool_grid.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._tool_grid.remove(child)
+            child = nxt
+
+        # Re-attach tool buttons
+        for i, (icon, tooltip, tool_id) in enumerate(self._tools_list):
+            btn_w = self._tool_buttons[tool_id]
+            self._tool_grid.attach(btn_w, i % cols, i // cols, 1, 1)
+
+        # Resize toolbox
+        width = cols * 28 + (cols + 1) * 2 + 10
+        self._toolbox_widget.set_size_request(width, -1)
+
     def _on_tool_clicked(self, btn, tool_id):
         self._set_active_tool(tool_id)
 
