@@ -1,8 +1,10 @@
-# Main window: HeaderBar, options bar, toolbox, canvas area, panels, statusbar
+# Main window: HeaderBar, options bar, toolbox, canvas, panels, statusbar
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw
+from gi.repository import Gtk, Adw, Gdk
+from pigment.ui.canvas import PigmentCanvas
+from pigment.core.document import Document
 
 class PigmentWindow(Adw.ApplicationWindow):
     def __init__(self, **kwargs):
@@ -11,7 +13,9 @@ class PigmentWindow(Adw.ApplicationWindow):
         self.set_default_size(1280, 860)
         self.set_size_request(900, 600)
 
-        # Root box stacks everything vertically
+        self._documents = []
+        self._active_doc = None
+
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.set_content(root)
 
@@ -31,7 +35,6 @@ class PigmentWindow(Adw.ApplicationWindow):
     def _build_headerbar(self):
         header = Adw.HeaderBar()
 
-        # App logo/name in centre
         title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         logo = Gtk.Label(label="Pg")
         logo.add_css_class("pigment-logo-mark")
@@ -44,17 +47,15 @@ class PigmentWindow(Adw.ApplicationWindow):
         title_box.append(version)
         header.set_title_widget(title_box)
 
-        # Dark mode toggle on the right
         self._dark = False
         self._theme_btn = Gtk.Button(label="☾  Dark")
-        self._theme_btn.set_tooltip_text("Toggle dark mode")
         self._theme_btn.add_css_class("flat")
         self._theme_btn.connect("clicked", self._toggle_theme)
         header.pack_end(self._theme_btn)
 
-        # New / Open buttons on the left
         new_btn = Gtk.Button(label="New")
         new_btn.add_css_class("flat")
+        new_btn.connect("clicked", self._on_new_document)
         open_btn = Gtk.Button(label="Open")
         open_btn.add_css_class("flat")
         header.pack_start(new_btn)
@@ -69,18 +70,14 @@ class PigmentWindow(Adw.ApplicationWindow):
         bar.set_margin_start(8)
         bar.set_margin_end(8)
 
-        # Active tool indicator
-        self._tool_label = Gtk.Label(label="🖌  Brush")
-        self._tool_label.add_css_class("pigment-tool-chip")
-        bar.append(self._tool_label)
+        self._tool_chip = Gtk.Label(label="🖌  Brush")
+        self._tool_chip.add_css_class("pigment-tool-chip")
+        bar.append(self._tool_chip)
         bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
-        # Brush options
         for label, value, width in [
-            ("Size", "19", 4),
-            ("Hardness", "80%", 5),
-            ("Opacity", "85%", 5),
-            ("Flow", "100%", 5),
+            ("Size", "19", 4), ("Hardness", "80%", 5),
+            ("Opacity", "85%", 5), ("Flow", "100%", 5),
         ]:
             lbl = Gtk.Label(label=label)
             lbl.add_css_class("pigment-ob-label")
@@ -92,14 +89,34 @@ class PigmentWindow(Adw.ApplicationWindow):
             bar.append(entry)
             bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
 
-        # Blend mode dropdown
         mode_lbl = Gtk.Label(label="Mode")
         mode_lbl.add_css_class("pigment-ob-label")
-        modes = Gtk.StringList.new(["Normal","Multiply","Screen","Overlay","Soft Light","Hard Light","Difference","Luminosity"])
+        modes = Gtk.StringList.new(
+            ["Normal","Multiply","Screen","Overlay","Soft Light","Hard Light","Difference","Luminosity"]
+        )
         mode_drop = Gtk.DropDown(model=modes)
-        mode_drop.add_css_class("pigment-ob-dropdown")
         bar.append(mode_lbl)
         bar.append(mode_drop)
+
+        # Zoom display on the far right
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        bar.append(spacer)
+        self._zoom_label = Gtk.Label(label="–")
+        self._zoom_label.add_css_class("pigment-ob-label")
+        zoom_out_btn = Gtk.Button(label="−")
+        zoom_out_btn.add_css_class("flat")
+        zoom_out_btn.connect("clicked", lambda _: self._canvas.zoom_out())
+        zoom_in_btn = Gtk.Button(label="+")
+        zoom_in_btn.add_css_class("flat")
+        zoom_in_btn.connect("clicked", lambda _: self._canvas.zoom_in())
+        fit_btn = Gtk.Button(label="Fit")
+        fit_btn.add_css_class("flat")
+        fit_btn.connect("clicked", lambda _: self._canvas.zoom_fit())
+        bar.append(zoom_out_btn)
+        bar.append(self._zoom_label)
+        bar.append(zoom_in_btn)
+        bar.append(fit_btn)
 
         return bar
 
@@ -116,33 +133,23 @@ class PigmentWindow(Adw.ApplicationWindow):
         box.set_margin_start(5)
         box.set_margin_end(5)
 
-        # (icon, tooltip, tool_id)
         tools = [
-            ("⊹", "Move (V)",          "move"),
-            ("⬚", "Marquee (M)",        "marquee"),
-            ("⌖", "Lasso (L)",          "lasso"),
-            ("✦", "Magic Wand (W)",     "wand"),
+            ("⊹","Move (V)","move"),         ("⬚","Marquee (M)","marquee"),
+            ("⌖","Lasso (L)","lasso"),        ("✦","Magic Wand (W)","wand"),
             None,
-            ("⌗", "Crop (C)",           "crop"),
-            ("⧉", "Slice (K)",          "slice"),
+            ("⌗","Crop (C)","crop"),          ("⧉","Slice (K)","slice"),
             None,
-            ("✚", "Healing Brush (J)",  "heal"),
-            ("🖌", "Brush (B)",          "brush"),
-            ("⎘", "Clone Stamp (S)",    "clone"),
-            ("◻", "Eraser (E)",         "eraser"),
+            ("✚","Healing Brush (J)","heal"), ("🖌","Brush (B)","brush"),
+            ("⎘","Clone Stamp (S)","clone"),  ("◻","Eraser (E)","eraser"),
             None,
-            ("▦", "Gradient (G)",       "gradient"),
-            ("⬡", "Paint Bucket",       "bucket"),
+            ("▦","Gradient (G)","gradient"),  ("⬡","Paint Bucket","bucket"),
             None,
-            ("◎", "Blur / Sharpen (R)", "blur"),
-            ("◑", "Dodge / Burn (O)",   "dodge"),
+            ("◎","Blur/Sharpen (R)","blur"),  ("◑","Dodge/Burn (O)","dodge"),
             None,
-            ("✒", "Pen (P)",            "pen"),
-            ("T",  "Type (T)",           "type"),
-            ("▭", "Shape (U)",           "shape"),
+            ("✒","Pen (P)","pen"),            ("T","Type (T)","type"),
+            ("▭","Shape (U)","shape"),
             None,
-            ("✥", "Hand (H)",           "hand"),
-            ("⊕", "Zoom (Z)",           "zoom"),
+            ("✥","Hand (H)","hand"),          ("⊕","Zoom (Z)","zoom"),
         ]
 
         self._tool_buttons = {}
@@ -163,39 +170,33 @@ class PigmentWindow(Adw.ApplicationWindow):
             self._tool_buttons[tool_id] = btn
             box.append(btn)
 
-        # Activate brush by default
         self._set_active_tool("brush")
 
-        # Color swatches at the bottom
         box.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        swatch_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        swatch_box.set_margin_top(6)
-        fg_btn = Gtk.ColorDialogButton()
-        fg_btn.set_tooltip_text("Foreground color")
-        bg_btn = Gtk.ColorDialogButton()
-        bg_btn.set_tooltip_text("Background color")
-        swatch_box.append(Gtk.Label(label="FG/BG"))
-        swatch_box.append(fg_btn)
-        swatch_box.append(bg_btn)
-        box.append(swatch_box)
+        swatch_lbl = Gtk.Label(label="FG/BG")
+        swatch_lbl.add_css_class("pigment-ob-label")
+        box.append(swatch_lbl)
 
         scroll.set_child(box)
         return scroll
 
     # ── CANVAS AREA ─────────────────────────────────────────────────────────
     def _build_canvas_area(self):
-        frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        frame.set_hexpand(True)
-        frame.add_css_class("pigment-canvas-area")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_hexpand(True)
+        box.set_vexpand(True)
 
-        # Placeholder until Phase 2 implements Cairo canvas
-        lbl = Gtk.Label()
-        lbl.set_markup('<span size="large" foreground="#888888">Canvas — Cairo rendering arrives in Phase 2</span>')
-        lbl.set_vexpand(True)
-        lbl.set_hexpand(True)
-        frame.append(lbl)
+        # Document tab bar
+        self._tab_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=1)
+        self._tab_bar.add_css_class("pigment-tabbar")
+        box.append(self._tab_bar)
 
-        return frame
+        # The real Cairo canvas
+        self._canvas = PigmentCanvas()
+        self._canvas.on_zoom_changed = self._on_zoom_changed
+        box.append(self._canvas)
+
+        return box
 
     # ── RIGHT PANELS ─────────────────────────────────────────────────────────
     def _build_panels(self):
@@ -205,37 +206,37 @@ class PigmentWindow(Adw.ApplicationWindow):
 
         notebook = Gtk.Notebook()
         notebook.set_vexpand(True)
-        notebook.set_tab_pos(Gtk.PositionType.TOP)
 
-        # Navigator tab
+        # Navigator
         nav_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         nav_box.set_margin_top(8); nav_box.set_margin_bottom(8)
         nav_box.set_margin_start(8); nav_box.set_margin_end(8)
-        nav_thumb = Gtk.Box()
-        nav_thumb.add_css_class("pigment-nav-thumb")
-        nav_thumb.set_size_request(-1, 90)
-        nav_box.append(nav_thumb)
+        self._nav_thumb = Gtk.DrawingArea()
+        self._nav_thumb.set_size_request(-1, 90)
+        self._nav_thumb.add_css_class("pigment-nav-thumb")
+        self._nav_thumb.set_draw_func(self._draw_nav_thumb)
+        nav_box.append(self._nav_thumb)
         zoom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         zoom_row.append(Gtk.Label(label="−"))
-        zoom_sl = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 5, 3200, 1)
-        zoom_sl.set_value(67); zoom_sl.set_hexpand(True); zoom_sl.set_draw_value(False)
-        zoom_row.append(zoom_sl)
+        self._nav_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 5, 3200, 1)
+        self._nav_slider.set_value(100)
+        self._nav_slider.set_hexpand(True)
+        self._nav_slider.set_draw_value(False)
+        self._nav_slider.connect("value-changed", self._on_nav_slider)
+        zoom_row.append(self._nav_slider)
         zoom_row.append(Gtk.Label(label="+"))
-        self._zoom_label = Gtk.Label(label="66.7%")
-        zoom_row.append(self._zoom_label)
+        self._nav_zoom_label = Gtk.Label(label="100%")
+        zoom_row.append(self._nav_zoom_label)
         nav_box.append(zoom_row)
         notebook.append_page(nav_box, Gtk.Label(label="Navigator"))
 
-        # Color tab
+        # Color
         color_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         color_box.set_margin_top(8); color_box.set_margin_bottom(8)
         color_box.set_margin_start(8); color_box.set_margin_end(8)
-        color_btn = Gtk.ColorDialogButton()
-        color_btn.set_hexpand(True)
-        color_box.append(color_btn)
-        for name, val in [("R", 160), ("G", 90), ("B", 200)]:
+        for ch_name, val in [("R", 0), ("G", 0), ("B", 0)]:
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            row.append(Gtk.Label(label=name))
+            row.append(Gtk.Label(label=ch_name))
             sl = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 255, 1)
             sl.set_value(val); sl.set_hexpand(True); sl.set_draw_value(False)
             row.append(sl)
@@ -243,74 +244,23 @@ class PigmentWindow(Adw.ApplicationWindow):
             color_box.append(row)
         notebook.append_page(color_box, Gtk.Label(label="Color"))
 
-        # History tab
+        # History
         hist_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         hist_box.set_margin_top(8); hist_box.set_margin_bottom(8)
         hist_box.set_margin_start(8); hist_box.set_margin_end(8)
-        for step in ["Open", "New Layer", "Brush", "Brush", "Levels"]:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            thumb = Gtk.Box()
-            thumb.add_css_class("pigment-layer-thumb")
-            thumb.set_size_request(22, 16)
-            row.append(thumb)
-            row.append(Gtk.Label(label=step, xalign=0))
-            hist_box.append(row)
+        self._history_box = hist_box
         notebook.append_page(hist_box, Gtk.Label(label="History"))
 
-        # Layers tab
-        layers_outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        layers_outer.set_margin_top(8); layers_outer.set_margin_bottom(4)
-        layers_outer.set_margin_start(8); layers_outer.set_margin_end(8)
-
-        # Blend mode + opacity row
-        blend_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        blend_row.set_margin_bottom(4)
+        # Layers
+        layers_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        layers_box.set_margin_top(8); layers_box.set_margin_bottom(8)
+        layers_box.set_margin_start(8); layers_box.set_margin_end(8)
         blend_strings = Gtk.StringList.new(["Normal","Multiply","Screen","Overlay"])
         blend_drop = Gtk.DropDown(model=blend_strings)
         blend_drop.set_hexpand(True)
-        blend_row.append(blend_drop)
-        blend_row.append(Gtk.Label(label="Opacity"))
-        op_entry = Gtk.Entry(); op_entry.set_text("100%"); op_entry.set_width_chars(5)
-        blend_row.append(op_entry)
-        layers_outer.append(blend_row)
-
-        # Layer rows
-        layers_data = [
-            ("👁", "Levels 1",   "Adjustment", "#667eea"),
-            ("👁", "Title Text", "Text",        "#f8f8f8"),
-            ("👁", "Layer 3",    "RGB · Active","#c4956a"),
-            ("👁", "Layer 2",    "Multiply",    "#7a5c3a"),
-            ("👁", "Background", "Locked",      "#e8d5b0"),
-        ]
-        for eye, name, meta, color in layers_data:
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            row.add_css_class("pigment-layer-row")
-            row.append(Gtk.Label(label=eye))
-            thumb = Gtk.Box()
-            thumb.add_css_class("pigment-layer-thumb")
-            thumb.set_size_request(26, 20)
-            row.append(thumb)
-            info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            n = Gtk.Label(label=name, xalign=0)
-            n.add_css_class("pigment-layer-name")
-            m = Gtk.Label(label=meta, xalign=0)
-            m.add_css_class("pigment-layer-meta")
-            info.append(n); info.append(m)
-            row.append(info)
-            layers_outer.append(row)
-
-        # Footer buttons
-        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        footer.set_margin_top(6)
-        for label, tip in [("ƒ","Add style"),("⬜","Add mask"),("◑","Adjustment"),("📁","New group"),("＋","New layer"),("⌫","Delete")]:
-            b = Gtk.Button(label=label)
-            b.set_tooltip_text(tip)
-            b.set_hexpand(True)
-            b.add_css_class("flat")
-            footer.append(b)
-        layers_outer.append(footer)
-
-        notebook.append_page(layers_outer, Gtk.Label(label="Layers"))
+        layers_box.append(blend_drop)
+        self._layers_box = layers_box
+        notebook.append_page(layers_box, Gtk.Label(label="Layers"))
 
         box.append(notebook)
         return box
@@ -320,14 +270,111 @@ class PigmentWindow(Adw.ApplicationWindow):
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         bar.add_css_class("pigment-statusbar")
         bar.set_margin_start(12); bar.set_margin_end(12)
-
-        for text in ['Pigment 0.1 "Buzz"', "Python 3.13 · GTK 4.18", "No document open"]:
-            bar.append(Gtk.Label(label=text))
+        self._status_doc   = Gtk.Label(label='Pigment 0.1 "Buzz"')
+        self._status_info  = Gtk.Label(label="Python 3.13 · GTK 4.18")
+        self._status_coord = Gtk.Label(label="No document open")
+        for w in [self._status_doc, self._status_info, self._status_coord]:
+            bar.append(w)
             bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
-
         return bar
 
-    # ── HELPERS ─────────────────────────────────────────────────────────────
+    # ── NEW DOCUMENT DIALOG ──────────────────────────────────────────────────
+    def _on_new_document(self, _btn):
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading="New Document",
+            body="Enter the canvas dimensions:",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("create", "Create")
+        dialog.set_response_appearance("create", Adw.ResponseAppearance.SUGGESTED)
+
+        # Width / Height entries
+        grid = Gtk.Grid(column_spacing=8, row_spacing=6)
+        grid.set_margin_top(8)
+        grid.attach(Gtk.Label(label="Width",  xalign=0), 0, 0, 1, 1)
+        grid.attach(Gtk.Label(label="Height", xalign=0), 0, 1, 1, 1)
+        w_entry = Gtk.Entry(); w_entry.set_text("1920"); w_entry.set_width_chars(8)
+        h_entry = Gtk.Entry(); h_entry.set_text("1080"); h_entry.set_width_chars(8)
+        grid.attach(w_entry, 1, 0, 1, 1)
+        grid.attach(h_entry, 1, 1, 1, 1)
+        grid.attach(Gtk.Label(label="px", xalign=0), 2, 0, 1, 1)
+        grid.attach(Gtk.Label(label="px", xalign=0), 2, 1, 1, 1)
+        dialog.set_extra_child(grid)
+
+        def on_response(dlg, response):
+            if response == "create":
+                try:
+                    w = max(1, min(16000, int(w_entry.get_text())))
+                    h = max(1, min(16000, int(h_entry.get_text())))
+                except ValueError:
+                    return
+                self._create_document(w, h)
+            dialog.destroy()
+
+        dialog.connect("response", on_response)
+        dialog.present()
+
+    def _create_document(self, width: int, height: int):
+        doc = Document(width, height, name="Untitled")
+        self._documents.append(doc)
+        self._active_doc = doc
+
+        # Add a tab
+        tab_btn = Gtk.Button(label=f"{doc.name}  ×")
+        tab_btn.add_css_class("flat")
+        tab_btn.add_css_class("pigment-tab-btn")
+        tab_btn.connect("clicked", lambda _: None)
+        self._tab_bar.append(tab_btn)
+
+        # Send to canvas
+        self._canvas.set_document(doc)
+
+        # Update status
+        self._status_doc.set_text(f"{doc.name} — {width}×{height} px")
+        self._status_info.set_text("RGB 8-bit")
+        self._zoom_label.set_text(f"{self._canvas.zoom_percent:.1f}%")
+
+    # ── NAVIGATOR THUMB ──────────────────────────────────────────────────────
+    def _draw_nav_thumb(self, area, cr, width, height):
+        if not self._active_doc:
+            cr.set_source_rgb(0.55, 0.38, 0.25)
+            cr.paint()
+            return
+        # Draw the document pixels scaled into the thumb
+        import cairo as _cairo
+        doc = self._active_doc
+        surf = self._canvas._numpy_to_cairo(doc.pixels)
+        scale_x = width  / doc.width
+        scale_y = height / doc.height
+        scale   = min(scale_x, scale_y)
+        ox = (width  - doc.width  * scale) / 2
+        oy = (height - doc.height * scale) / 2
+        cr.set_source_rgb(0.2, 0.2, 0.2)
+        cr.paint()
+        cr.save()
+        cr.translate(ox, oy)
+        cr.scale(scale, scale)
+        cr.set_source_surface(surf, 0, 0)
+        cr.paint()
+        cr.restore()
+
+    # ── ZOOM SYNC ────────────────────────────────────────────────────────────
+    def _on_zoom_changed(self, zoom: float):
+        pct = zoom * 100
+        self._zoom_label.set_text(f"{pct:.1f}%")
+        self._nav_zoom_label.set_text(f"{pct:.1f}%")
+        # Prevent slider feedback loop
+        self._nav_slider.handler_block_by_func(self._on_nav_slider)
+        self._nav_slider.set_value(pct)
+        self._nav_slider.handler_unblock_by_func(self._on_nav_slider)
+        self._nav_thumb.queue_draw()
+
+    def _on_nav_slider(self, slider):
+        zoom = slider.get_value() / 100.0
+        self._canvas._set_zoom(zoom, center=True)
+
+    # ── TOOL SWITCHING ───────────────────────────────────────────────────────
     def _on_tool_clicked(self, btn, tool_id):
         self._set_active_tool(tool_id)
 
@@ -338,6 +385,7 @@ class PigmentWindow(Adw.ApplicationWindow):
         if tool_id in self._tool_buttons:
             self._tool_buttons[tool_id].add_css_class("pigment-tool-active")
 
+    # ── THEME TOGGLE ─────────────────────────────────────────────────────────
     def _toggle_theme(self, btn):
         self._dark = not self._dark
         manager = Adw.StyleManager.get_default()
