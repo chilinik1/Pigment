@@ -269,3 +269,9 @@ scrollbar slider {
 scrollbar slider:hover {
   background-color: #b0aca5;
 }
+.pigment-tab-btn-active {
+  background-color: white;
+  border-color: #d3d0cb;
+  color: #1a1a2e;
+  font-weight: 500;
+}

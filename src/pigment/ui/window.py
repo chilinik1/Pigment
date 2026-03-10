@@ -312,13 +312,27 @@ class PigmentWindow(Adw.ApplicationWindow):
 
     # ── CANVAS AREA ──────────────────────────────────────────────────────────
     def _build_canvas_area(self):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         box.set_hexpand(True); box.set_vexpand(True)
-        box.add_css_class("pigment-canvas-bg")
+
+        canvas_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        canvas_box.set_hexpand(True); canvas_box.set_vexpand(True)
+        canvas_box.add_css_class("pigment-canvas-bg")
 
         self._canvas = PigmentCanvas()
         self._canvas.on_zoom_changed = self._on_zoom_changed
-        box.append(self._canvas)
+        canvas_box.append(self._canvas)
+        box.append(canvas_box)
+
+        # Thin toggle strip on the right edge of canvas
+        self._panel_toggle_strip = Gtk.Button(label="⟨")
+        self._panel_toggle_strip.add_css_class("flat")
+        self._panel_toggle_strip.add_css_class("pigment-ob-label")
+        self._panel_toggle_strip.set_valign(Gtk.Align.CENTER)
+        self._panel_toggle_strip.connect("clicked", self._toggle_panels)
+        self._panel_toggle_strip.set_visible(False)
+        box.append(self._panel_toggle_strip)
+
         return box
 
     # ── RIGHT PANEL ──────────────────────────────────────────────────────────
@@ -550,7 +564,9 @@ class PigmentWindow(Adw.ApplicationWindow):
         tab_btn = Gtk.Button(label=f"{doc.name}  ×")
         tab_btn.add_css_class("flat")
         tab_btn.add_css_class("pigment-tab-btn")
+        tab_btn.connect("clicked", self._on_tab_clicked, doc, tab_btn)
         self._tab_bar.append(tab_btn)
+        self._set_active_tab(tab_btn)
 
         self._canvas.set_document(doc)
         self._status_doc.set_text(f"{doc.name} — {width}×{height} px")
@@ -708,6 +724,21 @@ class PigmentWindow(Adw.ApplicationWindow):
             self._tool_buttons[tool_id].add_css_class("pigment-tool-active")
 
     # ── OB ENTRIES ───────────────────────────────────────────────────────────
+    def _on_tab_clicked(self, btn, doc, tab_btn):
+        self._active_doc = doc
+        self._canvas.set_document(doc)
+        self._set_active_tab(tab_btn)
+        self._status_doc.set_text(f"{doc.name} — {doc.width}×{doc.height} px")
+        self._status_info.set_text("RGB 8-bit")
+        self._zoom_label.set_text(f"{self._canvas.zoom_percent:.1f}%")
+
+    def _set_active_tab(self, active_btn):
+        child = self._tab_bar.get_first_child()
+        while child:
+            child.remove_css_class("pigment-tab-btn-active")
+            child = child.get_next_sibling()
+        active_btn.add_css_class("pigment-tab-btn-active")
+
     def _on_ob_entry_changed(self, entry, label):
         text = entry.get_text().replace("%", "").strip()
         try:
@@ -723,6 +754,7 @@ class PigmentWindow(Adw.ApplicationWindow):
     def _toggle_panels(self, *_):
         self._panel_visible = not self._panel_visible
         self._right_panel_box.set_visible(self._panel_visible)
+        self._panel_toggle_strip.set_visible(not self._panel_visible)
 
     # ── THEME ────────────────────────────────────────────────────────────────
     def _toggle_theme(self, *_):
