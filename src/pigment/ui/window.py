@@ -2,7 +2,7 @@
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk, Adw, Gdk
+from gi.repository import Gtk, Adw, Gdk, Gio
 from pigment.ui.canvas import PigmentCanvas
 from pigment.core.document import Document
 
@@ -58,8 +58,13 @@ class PigmentWindow(Adw.ApplicationWindow):
         new_btn.connect("clicked", self._on_new_document)
         open_btn = Gtk.Button(label="Open")
         open_btn.add_css_class("flat")
+        open_btn.connect("clicked", self._on_open_file)
+        save_btn = Gtk.Button(label="Save")
+        save_btn.add_css_class("flat")
+        save_btn.connect("clicked", self._on_save_file)
         header.pack_start(new_btn)
         header.pack_start(open_btn)
+        header.pack_start(save_btn)
 
         return header
 
@@ -310,6 +315,78 @@ class PigmentWindow(Adw.ApplicationWindow):
             bar.append(w)
             bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         return bar
+
+    # ── FILE I/O ──────────────────────────────────────────────────────────────
+
+    def _on_save_file(self, _btn):
+        if not self._active_doc:
+            return
+        dialog = Gtk.FileDialog.new()
+        dialog.set_title("Save as PNG")
+        dialog.set_initial_name(f"{self._active_doc.name}.png")
+        png_filter = Gtk.FileFilter()
+        png_filter.set_name("PNG images")
+        png_filter.add_mime_type("image/png")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(png_filter)
+        dialog.set_filters(filters)
+        dialog.save(self, None, self._on_save_response)
+
+    def _on_save_response(self, dialog, result):
+        try:
+            file = dialog.save_finish(result)
+        except Exception:
+            return
+        if not file:
+            return
+        path = file.get_path()
+        if not path.endswith(".png"):
+            path += ".png"
+        from PIL import Image
+        import numpy as np
+        pixels = self._active_doc.pixels
+        img = Image.fromarray(pixels[:, :, :3], "RGB")
+        img.save(path)
+        self._active_doc.name = path.split("/")[-1].replace(".png", "")
+        self._active_doc.modified = False
+        self._status_doc.set_text(f"{self._active_doc.name} — saved")
+
+    def _on_open_file(self, _btn):
+        dialog = Gtk.FileDialog.new()
+        dialog.set_title("Open image")
+        png_filter = Gtk.FileFilter()
+        png_filter.set_name("PNG images")
+        png_filter.add_mime_type("image/png")
+        filters = Gio.ListStore.new(Gtk.FileFilter)
+        filters.append(png_filter)
+        dialog.set_filters(filters)
+        dialog.open(self, None, self._on_open_response)
+
+    def _on_open_response(self, dialog, result):
+        try:
+            file = dialog.open_finish(result)
+        except Exception:
+            return
+        if not file:
+            return
+        path = file.get_path()
+        from PIL import Image
+        import numpy as np
+        img = Image.open(path).convert("RGBA")
+        arr = np.array(img, dtype=np.uint8)
+        name = path.split("/")[-1].replace(".png", "")
+        doc = Document(arr.shape[1], arr.shape[0], name=name)
+        doc.pixels = arr
+        self._documents.append(doc)
+        self._active_doc = doc
+        tab_btn = Gtk.Button(label=f"{doc.name}  ×")
+        tab_btn.add_css_class("flat")
+        tab_btn.add_css_class("pigment-tab-btn")
+        self._tab_bar.append(tab_btn)
+        self._canvas.set_document(doc)
+        self._status_doc.set_text(f"{doc.name} — {doc.width}×{doc.height} px")
+        self._status_info.set_text("RGB 8-bit")
+        self._zoom_label.set_text(f"{self._canvas.zoom_percent:.1f}%")
 
     # ── NEW DOCUMENT DIALOG ──────────────────────────────────────────────────
     def _on_new_document(self, _btn):
