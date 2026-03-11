@@ -5,3 +5,9 @@ __pycache__/
 _build/
 *.egg-info/
 .mypy_cache/
+.venvs/
+*.swp
+*.swo
+.DS_Store
+dist/
+build/
