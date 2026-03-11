@@ -395,21 +395,17 @@ class PigmentWindow(Adw.ApplicationWindow):
             self._rebuild_tool_grid(cols)
 
     def _detach_toolbox(self, *_):
-        """Pop the toolbox out into a floating window."""
-        if hasattr(self, '_toolbox_floated') and self._toolbox_floated:
+        if self._toolbox_floated:
             return
-
         self._toolbox_floated = True
-        self._toolbox_widget.set_visible(True)
+        self._toolbox_widget.set_visible(False)
 
-        # Create floating window
         float_win = Gtk.Window()
         float_win.set_title("Tools")
         float_win.set_transient_for(self)
         float_win.set_resizable(True)
-        float_win.set_default_size(64, 500)
+        float_win.set_default_size(70, 560)
 
-        # Build a fresh toolbox body for the float window
         float_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         float_box.add_css_class("pigment-toolbox")
 
@@ -420,39 +416,57 @@ class PigmentWindow(Adw.ApplicationWindow):
         float_grid.set_margin_end(4)
         float_grid.set_margin_top(4)
 
+        # Create fresh buttons for the float window
+        # (GTK widgets can only have one parent)
+        cols = 2
         for i, (icon, tooltip, tool_id) in enumerate(self._tools_list):
-            btn = self._tool_buttons[tool_id]
-            # Reparent button into float grid
-            float_grid.attach(btn, i % 2, i // 2, 1, 1)
+            btn = Gtk.Button(label=icon)
+            btn.set_tooltip_text(tooltip)
+            btn.add_css_class("pigment-tool-btn")
+            btn.set_size_request(26, 26)
+            if tool_id == self._active_tool_id:
+                btn.add_css_class("pigment-tool-active")
+            btn.connect("clicked", self._on_float_tool_clicked, tool_id, float_win)
+            float_grid.attach(btn, i % cols, i // cols, 1, 1)
 
         float_box.append(float_grid)
 
-        # Redock button at bottom
-        redock_btn = Gtk.Button(label="⬛ Dock")
-        redock_btn.add_css_class("flat")
-        redock_btn.add_css_class("pigment-ob-label")
-        redock_btn.set_margin_top(4)
-        redock_btn.set_margin_bottom(4)
-        redock_btn.connect("clicked", self._redock_toolbox, float_win)
-        float_box.append(redock_btn)
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(6)
+        float_box.append(sep)
+
+        dock_btn = Gtk.Button(label="← Dock")
+        dock_btn.add_css_class("flat")
+        dock_btn.add_css_class("pigment-ob-label")
+        dock_btn.set_margin_top(4)
+        dock_btn.set_margin_bottom(4)
+        dock_btn.connect("clicked", self._redock_toolbox, float_win)
+        float_box.append(dock_btn)
 
         float_win.set_child(float_box)
-
-        def on_close(*_):
-            self._redock_toolbox(None, float_win)
-            return True
-
-        float_win.connect("close-request", on_close)
+        float_win.connect("close-request", self._on_float_win_close, float_win)
         float_win.present()
         self._float_win = float_win
 
-    def _redock_toolbox(self, btn, float_win):
-        """Return toolbox buttons to the docked position."""
-        # Move buttons back to main tool grid
-        self._rebuild_tool_grid(self._toolbox_cols)
-        float_win.destroy()
-        self._toolbox_floated = False
-        self._toolbox_wrapper.set_visible(True)
+    def _on_float_tool_clicked(self, btn, tool_id, float_win):
+        # Update active tool in both float and docked toolbox
+        self._set_active_tool(tool_id)
+        # Update float window button highlights
+        grid = self._float_win.get_child().get_first_child()
+        child = grid.get_first_child()
+        i = 0
+        while child:
+            if i < len(self._tools_list):
+                if self._tools_list[i][2] == tool_id:
+                    child.add_css_class("pigment-tool-active")
+                else:
+                    child.remove_css_class("pigment-tool-active")
+            i += 1
+            child = child.get_next_sibling()
+
+    def _on_float_win_close(self, win, float_win):
+        self._redock_toolbox(None, float_win)
+        return True
 
     # ── CANVAS AREA ──────────────────────────────────────────────────────────
     def _build_canvas_area(self):
