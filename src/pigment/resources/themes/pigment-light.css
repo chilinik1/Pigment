@@ -120,7 +120,8 @@ popover modelbutton:hover {
 .pigment-tab-btn:hover {
   background-color: rgba(255,255,255,0.5);
 }
-.pigment-tab-btn.active {
+.pigment-tab-btn.active,
+.pigment-tab-btn-active {
   background-color: white;
   border-color: #d3d0cb;
   color: #1a1a2e;
@@ -264,14 +265,7 @@ scrollbar slider {
   background-color: #c8c5be;
   border-radius: 4px;
   min-width: 6px;
-  min-height: 6px;
 }
 scrollbar slider:hover {
   background-color: #b0aca5;
-}
-.pigment-tab-btn-active {
-  background-color: white;
-  border-color: #d3d0cb;
-  color: #1a1a2e;
-  font-weight: 500;
 }
