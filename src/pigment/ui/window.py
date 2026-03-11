@@ -260,34 +260,21 @@ class PigmentWindow(Adw.ApplicationWindow):
 
     # ── TOOLBOX ──────────────────────────────────────────────────────────────
     def _build_toolbox(self):
-        # Outer container — not full height, sits at top
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.add_css_class("pigment-toolbox")
-        outer.set_valign(Gtk.Align.START)  # sit at top like PS
-        outer.set_size_request(30, -1)     # start narrow, auto-expands
+        outer.set_valign(Gtk.Align.START)
 
-        # Drag handle — click to detach, visual grip
-        handle = Gtk.Button()
-        handle.add_css_class("pigment-toolbox-handle-btn")
-        handle_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        handle_box.set_halign(Gtk.Align.CENTER)
-        handle_box.set_margin_top(4)
-        handle_box.set_margin_bottom(4)
-        for _ in range(3):
-            dot_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-            dot_row.set_halign(Gtk.Align.CENTER)
-            for _ in range(3):
-                dot = Gtk.Box()
-                dot.set_size_request(2, 2)
-                dot.add_css_class("pigment-handle-dot")
-                dot_row.append(dot)
-            handle_box.append(dot_row)
-        handle.set_child(handle_box)
-        handle.set_tooltip_text("Drag to detach toolbox")
+        # Drag handle — click to detach
+        handle = Gtk.Button(label="⠿")
+        handle.add_css_class("flat")
+        handle.add_css_class("pigment-ob-label")
+        handle.set_tooltip_text("Click to detach toolbox")
+        handle.set_margin_top(4)
+        handle.set_margin_bottom(2)
         handle.connect("clicked", self._detach_toolbox)
         outer.append(handle)
 
-        # Tool grid — columns auto-calculated from width
+        # Tool grid
         self._tool_grid = Gtk.Grid()
         self._tool_grid.set_row_spacing(2)
         self._tool_grid.set_column_spacing(2)
@@ -318,7 +305,7 @@ class PigmentWindow(Adw.ApplicationWindow):
 
         self._tool_buttons = {}
         self._active_tool_id = None
-        self._toolbox_cols = 2  # default, recalculated on resize
+        self._toolbox_cols = 2
 
         for i, (icon, tooltip, tool_id) in enumerate(self._tools_list):
             btn = Gtk.Button(label=icon)
@@ -371,18 +358,9 @@ class PigmentWindow(Adw.ApplicationWindow):
 
         outer.append(swatch_area)
 
-        # Listen to width changes to auto-recalculate columns
-        self._toolbox_widget = wrapper
-
-        # Wrap in a resize-aware box so we can detect width
-        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        wrapper.set_valign(Gtk.Align.FILL)
-        wrapper.add_css_class("pigment-toolbox-wrapper")
-        wrapper.append(outer)
-        wrapper.connect("size-allocate", self._on_toolbox_size_allocate)
-
-        self._toolbox_wrapper = wrapper
-        return wrapper
+        self._toolbox_widget = outer
+        self._toolbox_floated = False
+        return outer
 
     def _on_toolbox_size_allocate(self, widget, allocation):
         """Auto-calculate columns based on available width."""
