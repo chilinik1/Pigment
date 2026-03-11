@@ -468,6 +468,12 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._redock_toolbox(None, float_win)
         return True
 
+    def _redock_toolbox(self, btn, float_win):
+        float_win.destroy()
+        self._toolbox_floated = False
+        self._toolbox_widget.set_visible(True)
+        self._rebuild_tool_grid(self._toolbox_cols)
+
     # ── CANVAS AREA ──────────────────────────────────────────────────────────
     def _build_canvas_area(self):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
