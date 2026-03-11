@@ -372,8 +372,7 @@ class PigmentWindow(Adw.ApplicationWindow):
         outer.append(swatch_area)
 
         # Listen to width changes to auto-recalculate columns
-        outer.connect("notify::default-width", self._on_toolbox_resized)
-        self._toolbox_widget = outer
+        self._toolbox_widget = wrapper
 
         # Wrap in a resize-aware box so we can detect width
         wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
