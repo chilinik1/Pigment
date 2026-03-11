@@ -16,7 +16,8 @@ class PigmentWindow(Adw.ApplicationWindow):
 
         self._documents = []
         self._active_doc = None
-        self._color_rgb = [0, 0, 0]
+        self._color_rgb    = [0, 0, 0]
+        self._bg_color_rgb = [255, 255, 255]
         self._rgb_sliders = {}
         self._rgb_value_labels = {}
         self._panel_visible = True
@@ -326,13 +327,40 @@ class PigmentWindow(Adw.ApplicationWindow):
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         sep.set_margin_top(6)
         outer.append(sep)
-        swatch_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        swatch_box.set_margin_top(6)
-        swatch_box.set_halign(Gtk.Align.CENTER)
-        fg_lbl = Gtk.Label(label="FG/BG")
-        fg_lbl.add_css_class("pigment-ob-label")
-        swatch_box.append(fg_lbl)
-        outer.append(swatch_box)
+
+        swatch_area = Gtk.Fixed()
+        swatch_area.set_size_request(54, 44)
+        swatch_area.set_margin_top(4)
+        swatch_area.set_halign(Gtk.Align.CENTER)
+
+        # BG swatch (white, behind)
+        self._bg_swatch = Gtk.DrawingArea()
+        self._bg_swatch.set_size_request(28, 28)
+        self._bg_swatch.set_draw_func(self._draw_bg_swatch)
+        swatch_area.put(self._bg_swatch, 18, 14)
+
+        # FG swatch (black, front)
+        self._fg_swatch = Gtk.DrawingArea()
+        self._fg_swatch.set_size_request(28, 28)
+        self._fg_swatch.set_draw_func(self._draw_fg_swatch)
+        swatch_area.put(self._fg_swatch, 4, 2)
+
+        # Reset and swap labels
+        reset_btn = Gtk.Button(label="↺")
+        reset_btn.add_css_class("flat")
+        reset_btn.add_css_class("pigment-ob-label")
+        reset_btn.set_size_request(16, 16)
+        reset_btn.connect("clicked", self._reset_colors)
+        swatch_area.put(reset_btn, 0, 28)
+
+        swap_btn = Gtk.Button(label="⇄")
+        swap_btn.add_css_class("flat")
+        swap_btn.add_css_class("pigment-ob-label")
+        swap_btn.set_size_request(16, 16)
+        swap_btn.connect("clicked", self._swap_colors)
+        swatch_area.put(swap_btn, 36, 0)
+
+        outer.append(swatch_area)
 
         return outer
 
@@ -670,23 +698,58 @@ class PigmentWindow(Adw.ApplicationWindow):
 
     # ── NAVIGATOR ────────────────────────────────────────────────────────────
     def _draw_nav_thumb(self, area, cr, width, height):
-        if not self._active_doc:
-            cr.set_source_rgb(0.55, 0.38, 0.25)
-            cr.paint()
-            return
-        doc = self._active_doc
-        surf = self._canvas._numpy_to_cairo(doc.pixels)
-        scale = min(width / doc.width, height / doc.height)
-        ox = (width  - doc.width  * scale) / 2
-        oy = (height - doc.height * scale) / 2
-        cr.set_source_rgb(0.2, 0.2, 0.2)
+        import cairo
+        # Dark background
+        cr.set_source_rgb(0.18, 0.18, 0.18)
         cr.paint()
+
+        if not self._active_doc:
+            return
+
+        doc = self._active_doc
+        pixels = doc.pixels
+
+        # Build a Cairo surface from the pixel buffer
+        import numpy as np
+        h, w = pixels.shape[:2]
+        bgra = np.zeros((h, w, 4), dtype=np.uint8)
+        bgra[:, :, 0] = pixels[:, :, 2]  # B
+        bgra[:, :, 1] = pixels[:, :, 1]  # G
+        bgra[:, :, 2] = pixels[:, :, 0]  # R
+        bgra[:, :, 3] = pixels[:, :, 3]  # A
+
+        stride = cairo.ImageSurface.format_stride_for_width(cairo.FORMAT_ARGB32, w)
+        flat = bgra.tobytes()
+        surf = cairo.ImageSurface.create_for_data(
+            bytearray(flat), cairo.FORMAT_ARGB32, w, h, stride
+        )
+
+        scale = min(width / w, height / h) * 0.95
+        ox = (width  - w * scale) / 2
+        oy = (height - h * scale) / 2
+
         cr.save()
         cr.translate(ox, oy)
         cr.scale(scale, scale)
         cr.set_source_surface(surf, 0, 0)
         cr.paint()
         cr.restore()
+
+        # Viewport indicator
+        if hasattr(self._canvas, '_offset_x'):
+            zoom = self._canvas._zoom
+            vw = self._canvas.get_width()
+            vh = self._canvas.get_height()
+            ox2 = self._canvas._offset_x
+            oy2 = self._canvas._offset_y
+            vp_x = ox + (-ox2 / zoom) * scale
+            vp_y = oy + (-oy2 / zoom) * scale
+            vp_w = (vw / zoom) * scale
+            vp_h = (vh / zoom) * scale
+            cr.set_source_rgba(0.49, 0.36, 0.75, 0.9)
+            cr.set_line_width(1.5)
+            cr.rectangle(vp_x, vp_y, vp_w, vp_h)
+            cr.stroke()
 
     def _on_zoom_changed(self, zoom):
         pct = zoom * 100
@@ -736,6 +799,8 @@ class PigmentWindow(Adw.ApplicationWindow):
         self._canvas._brush_color = (r, g, b)
         self._color_swatch.queue_draw()
         self._hex_entry.set_text(f"{r:02x}{g:02x}{b:02x}")
+        if hasattr(self, '_fg_swatch'):
+            self._fg_swatch.queue_draw()
 
     # ── TOOLS ────────────────────────────────────────────────────────────────
     def _on_toolbox_cols(self, btn, cols):
@@ -760,6 +825,53 @@ class PigmentWindow(Adw.ApplicationWindow):
         # Resize toolbox
         width = cols * 28 + (cols + 1) * 2 + 10
         self._toolbox_widget.set_size_request(width, -1)
+
+    def _draw_fg_swatch(self, area, cr, width, height):
+        r, g, b = [v / 255.0 for v in self._color_rgb]
+        # Checkerboard for transparency hint
+        cr.set_source_rgb(0.88, 0.88, 0.88)
+        cr.paint()
+        cr.set_source_rgb(r, g, b)
+        cr.paint()
+        cr.set_source_rgba(0, 0, 0, 0.4)
+        cr.set_line_width(1)
+        cr.rectangle(0.5, 0.5, width - 1, height - 1)
+        cr.stroke()
+
+    def _draw_bg_swatch(self, area, cr, width, height):
+        r, g, b = [v / 255.0 for v in self._bg_color_rgb]
+        cr.set_source_rgb(r, g, b)
+        cr.paint()
+        cr.set_source_rgba(0, 0, 0, 0.25)
+        cr.set_line_width(1)
+        cr.rectangle(0.5, 0.5, width - 1, height - 1)
+        cr.stroke()
+
+    def _reset_colors(self, *_):
+        self._color_rgb = [0, 0, 0]
+        self._bg_color_rgb = [255, 255, 255]
+        self._apply_fg_color()
+        self._fg_swatch.queue_draw()
+        self._bg_swatch.queue_draw()
+
+    def _swap_colors(self, *_):
+        self._color_rgb, self._bg_color_rgb = self._bg_color_rgb, self._color_rgb
+        self._apply_fg_color()
+        self._fg_swatch.queue_draw()
+        self._bg_swatch.queue_draw()
+
+    def _apply_fg_color(self):
+        r, g, b = self._color_rgb
+        self._canvas._brush_color = (r, g, b)
+        for idx, val in enumerate([r, g, b]):
+            self._rgb_sliders[idx].handler_block_by_func(self._on_rgb_slider)
+            self._rgb_sliders[idx].set_value(val)
+            self._rgb_value_labels[idx].set_text(str(val))
+            self._rgb_sliders[idx].handler_unblock_by_func(self._on_rgb_slider)
+        self._color_swatch.queue_draw()
+        self._hex_entry.set_text(f"{r:02x}{g:02x}{b:02x}")
+        if hasattr(self, '_fg_swatch'):
+            self._fg_swatch.queue_draw()
 
     def _on_tool_clicked(self, btn, tool_id):
         self._set_active_tool(tool_id)
