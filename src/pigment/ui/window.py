@@ -33,6 +33,8 @@ class PigmentWindow(Adw.ApplicationWindow):
         workspace.set_vexpand(True)
 
         self._toolbox_widget = self._build_toolbox()
+        self._toolbox_widget.set_hexpand(False)
+        self._toolbox_widget.connect("notify::allocated-width", self._on_toolbox_resized)
         workspace.append(self._toolbox_widget)
 
         # Paned gives resizable split between canvas and right panel
@@ -384,13 +386,21 @@ class PigmentWindow(Adw.ApplicationWindow):
             btn = self._tool_buttons[tool_id]
             self._tool_grid.attach(btn, i % cols, i // cols, 1, 1)
 
+    def _on_toolbox_resized(self, widget, _param):
+        w = widget.get_allocated_width()
+        btn_size = 30
+        cols = max(1, min(4, w // btn_size))
+        if cols != self._toolbox_cols:
+            self._toolbox_cols = cols
+            self._rebuild_tool_grid(cols)
+
     def _detach_toolbox(self, *_):
         """Pop the toolbox out into a floating window."""
         if hasattr(self, '_toolbox_floated') and self._toolbox_floated:
             return
 
         self._toolbox_floated = True
-        self._toolbox_wrapper.set_visible(False)
+        self._toolbox_widget.set_visible(True)
 
         # Create floating window
         float_win = Gtk.Window()
