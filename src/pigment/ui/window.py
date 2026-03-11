@@ -260,109 +260,212 @@ class PigmentWindow(Adw.ApplicationWindow):
 
     # ── TOOLBOX ──────────────────────────────────────────────────────────────
     def _build_toolbox(self):
+        # Outer container — not full height, sits at top
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.add_css_class("pigment-toolbox")
-        outer.set_size_request(82, -1)
+        outer.set_valign(Gtk.Align.START)  # sit at top like PS
+        outer.set_size_request(30, -1)     # start narrow, auto-expands
 
-        # Column switcher
-        col_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        col_row.set_halign(Gtk.Align.CENTER)
-        col_row.set_margin_top(4); col_row.set_margin_bottom(4)
-        self._col_buttons = {}
-        self._toolbox_cols = 3
-        for n in [1, 2, 3, 4]:
-            cb = Gtk.Button(label=str(n))
-            cb.add_css_class("pigment-tool-btn")
-            cb.set_size_request(18, 18)
-            cb.connect("clicked", self._on_toolbox_cols, n)
-            self._col_buttons[n] = cb
-            col_row.append(cb)
-        self._col_buttons[3].add_css_class("pigment-tool-active")
-        outer.append(col_row)
+        # Drag handle — click to detach, visual grip
+        handle = Gtk.Button()
+        handle.add_css_class("pigment-toolbox-handle-btn")
+        handle_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        handle_box.set_halign(Gtk.Align.CENTER)
+        handle_box.set_margin_top(4)
+        handle_box.set_margin_bottom(4)
+        for _ in range(3):
+            dot_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+            dot_row.set_halign(Gtk.Align.CENTER)
+            for _ in range(3):
+                dot = Gtk.Box()
+                dot.set_size_request(2, 2)
+                dot.add_css_class("pigment-handle-dot")
+                dot_row.append(dot)
+            handle_box.append(dot_row)
+        handle.set_child(handle_box)
+        handle.set_tooltip_text("Drag to detach toolbox")
+        handle.connect("clicked", self._detach_toolbox)
+        outer.append(handle)
 
-        # Tool grid
+        # Tool grid — columns auto-calculated from width
         self._tool_grid = Gtk.Grid()
         self._tool_grid.set_row_spacing(2)
         self._tool_grid.set_column_spacing(2)
-        grid = self._tool_grid
+        self._tool_grid.set_margin_start(4)
+        self._tool_grid.set_margin_end(4)
 
-        tools = [
-            ("⊹","Move (V)","move"),
-            ("⬚","Marquee (M)","marquee"),
-            ("⌖","Lasso (L)","lasso"),
-            ("✦","Magic Wand (W)","wand"),
-            ("⌗","Crop (C)","crop"),
-            ("⧉","Slice (K)","slice"),
-            ("✚","Healing Brush (J)","heal"),
-            ("🖌","Brush (B)","brush"),
-            ("⎘","Clone Stamp (S)","clone"),
-            ("◻","Eraser (E)","eraser"),
-            ("▦","Gradient (G)","gradient"),
-            ("⬡","Paint Bucket","bucket"),
-            ("◎","Blur/Sharpen (R)","blur"),
-            ("◑","Dodge/Burn (O)","dodge"),
-            ("✒","Pen (P)","pen"),
-            ("T","Type (T)","type"),
-            ("▭","Shape (U)","shape"),
-            ("✥","Hand (H)","hand"),
-            ("⊕","Zoom (Z)","zoom"),
+        self._tools_list = [
+            ("⊹", "Move (V)",           "move"),
+            ("⬚", "Marquee (M)",         "marquee"),
+            ("⌖", "Lasso (L)",           "lasso"),
+            ("✦", "Magic Wand (W)",      "wand"),
+            ("⌗", "Crop (C)",            "crop"),
+            ("⧉", "Slice (K)",           "slice"),
+            ("✚", "Healing Brush (J)",   "heal"),
+            ("🖌", "Brush (B)",           "brush"),
+            ("⎘", "Clone Stamp (S)",     "clone"),
+            ("◻", "Eraser (E)",          "eraser"),
+            ("▦", "Gradient (G)",        "gradient"),
+            ("⬡", "Paint Bucket",        "bucket"),
+            ("◎", "Blur/Sharpen (R)",    "blur"),
+            ("◑", "Dodge/Burn (O)",      "dodge"),
+            ("✒", "Pen (P)",             "pen"),
+            ("T", "Type (T)",            "type"),
+            ("▭", "Shape (U)",           "shape"),
+            ("✥", "Hand (H)",            "hand"),
+            ("⊕", "Zoom (Z)",            "zoom"),
         ]
 
         self._tool_buttons = {}
         self._active_tool_id = None
-        cols = 3
-        for i, (icon, tooltip, tool_id) in enumerate(tools):
+        self._toolbox_cols = 2  # default, recalculated on resize
+
+        for i, (icon, tooltip, tool_id) in enumerate(self._tools_list):
             btn = Gtk.Button(label=icon)
             btn.set_tooltip_text(tooltip)
             btn.add_css_class("pigment-tool-btn")
+            btn.set_size_request(26, 26)
             btn.connect("clicked", self._on_tool_clicked, tool_id)
             self._tool_buttons[tool_id] = btn
-            grid.attach(btn, i % cols, i // cols, 1, 1)
+            self._tool_grid.attach(btn, i % 2, i // 2, 1, 1)
 
-        self._tools_list = tools
         outer.append(self._tool_grid)
         self._set_active_tool("brush")
 
         # FG/BG swatches
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
         sep.set_margin_top(6)
+        sep.set_margin_start(4)
+        sep.set_margin_end(4)
         outer.append(sep)
 
         swatch_area = Gtk.Fixed()
-        swatch_area.set_size_request(54, 44)
+        swatch_area.set_size_request(54, 48)
         swatch_area.set_margin_top(4)
+        swatch_area.set_margin_bottom(6)
         swatch_area.set_halign(Gtk.Align.CENTER)
 
-        # BG swatch (white, behind)
         self._bg_swatch = Gtk.DrawingArea()
         self._bg_swatch.set_size_request(28, 28)
         self._bg_swatch.set_draw_func(self._draw_bg_swatch)
         swatch_area.put(self._bg_swatch, 18, 14)
 
-        # FG swatch (black, front)
         self._fg_swatch = Gtk.DrawingArea()
         self._fg_swatch.set_size_request(28, 28)
         self._fg_swatch.set_draw_func(self._draw_fg_swatch)
         swatch_area.put(self._fg_swatch, 4, 2)
 
-        # Reset and swap labels
         reset_btn = Gtk.Button(label="↺")
         reset_btn.add_css_class("flat")
         reset_btn.add_css_class("pigment-ob-label")
         reset_btn.set_size_request(16, 16)
         reset_btn.connect("clicked", self._reset_colors)
-        swatch_area.put(reset_btn, 0, 28)
+        swatch_area.put(reset_btn, 0, 30)
 
         swap_btn = Gtk.Button(label="⇄")
         swap_btn.add_css_class("flat")
         swap_btn.add_css_class("pigment-ob-label")
         swap_btn.set_size_request(16, 16)
         swap_btn.connect("clicked", self._swap_colors)
-        swatch_area.put(swap_btn, 36, 0)
+        swatch_area.put(swap_btn, 38, 0)
 
         outer.append(swatch_area)
 
-        return outer
+        # Listen to width changes to auto-recalculate columns
+        outer.connect("notify::default-width", self._on_toolbox_resized)
+        self._toolbox_widget = outer
+
+        # Wrap in a resize-aware box so we can detect width
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        wrapper.set_valign(Gtk.Align.FILL)
+        wrapper.add_css_class("pigment-toolbox-wrapper")
+        wrapper.append(outer)
+        wrapper.connect("size-allocate", self._on_toolbox_size_allocate)
+
+        self._toolbox_wrapper = wrapper
+        return wrapper
+
+    def _on_toolbox_size_allocate(self, widget, allocation):
+        """Auto-calculate columns based on available width."""
+        w = allocation.width
+        btn_size = 28  # button width + spacing
+        cols = max(1, min(4, w // btn_size))
+        if cols == self._toolbox_cols:
+            return
+        self._toolbox_cols = cols
+        self._rebuild_tool_grid(cols)
+
+    def _rebuild_tool_grid(self, cols):
+        # Remove all children from grid
+        child = self._tool_grid.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._tool_grid.remove(child)
+            child = nxt
+        # Re-attach with new column count
+        for i, (icon, tooltip, tool_id) in enumerate(self._tools_list):
+            btn = self._tool_buttons[tool_id]
+            self._tool_grid.attach(btn, i % cols, i // cols, 1, 1)
+
+    def _detach_toolbox(self, *_):
+        """Pop the toolbox out into a floating window."""
+        if hasattr(self, '_toolbox_floated') and self._toolbox_floated:
+            return
+
+        self._toolbox_floated = True
+        self._toolbox_wrapper.set_visible(False)
+
+        # Create floating window
+        float_win = Gtk.Window()
+        float_win.set_title("Tools")
+        float_win.set_transient_for(self)
+        float_win.set_resizable(True)
+        float_win.set_default_size(64, 500)
+
+        # Build a fresh toolbox body for the float window
+        float_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        float_box.add_css_class("pigment-toolbox")
+
+        float_grid = Gtk.Grid()
+        float_grid.set_row_spacing(2)
+        float_grid.set_column_spacing(2)
+        float_grid.set_margin_start(4)
+        float_grid.set_margin_end(4)
+        float_grid.set_margin_top(4)
+
+        for i, (icon, tooltip, tool_id) in enumerate(self._tools_list):
+            btn = self._tool_buttons[tool_id]
+            # Reparent button into float grid
+            float_grid.attach(btn, i % 2, i // 2, 1, 1)
+
+        float_box.append(float_grid)
+
+        # Redock button at bottom
+        redock_btn = Gtk.Button(label="⬛ Dock")
+        redock_btn.add_css_class("flat")
+        redock_btn.add_css_class("pigment-ob-label")
+        redock_btn.set_margin_top(4)
+        redock_btn.set_margin_bottom(4)
+        redock_btn.connect("clicked", self._redock_toolbox, float_win)
+        float_box.append(redock_btn)
+
+        float_win.set_child(float_box)
+
+        def on_close(*_):
+            self._redock_toolbox(None, float_win)
+            return True
+
+        float_win.connect("close-request", on_close)
+        float_win.present()
+        self._float_win = float_win
+
+    def _redock_toolbox(self, btn, float_win):
+        """Return toolbox buttons to the docked position."""
+        # Move buttons back to main tool grid
+        self._rebuild_tool_grid(self._toolbox_cols)
+        float_win.destroy()
+        self._toolbox_floated = False
+        self._toolbox_wrapper.set_visible(True)
 
     # ── CANVAS AREA ──────────────────────────────────────────────────────────
     def _build_canvas_area(self):

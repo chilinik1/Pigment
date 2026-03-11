@@ -158,7 +158,7 @@ popover modelbutton:hover {
   border-radius: 2px;
   min-height: 4px;
   min-width: 32px;
-  margin: 2px 0 6px;
+  margin: 2px auto 6px;
 }
 
 /* ── CANVAS AREA ── */
@@ -268,4 +268,28 @@ scrollbar slider {
 }
 scrollbar slider:hover {
   background-color: #b0aca5;
+}
+
+/* ── TOOLBOX HANDLE ── */
+.pigment-toolbox-handle-btn {
+  background: transparent;
+  border: none;
+  padding: 2px;
+  min-height: 0;
+}
+.pigment-toolbox-handle-btn:hover {
+  background-color: rgba(0,0,0,0.07);
+  border-radius: 4px;
+}
+.pigment-handle-dot {
+  background-color: #b0aca5;
+  border-radius: 1px;
+}
+
+/* ── TOOLBOX WRAPPER ── */
+.pigment-toolbox-wrapper {
+  border-right: 1px solid #d3d0cb;
+  background-color: #f0eff0;
+  min-width: 30px;
+  max-width: 120px;
 }
